@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: nldoc
+  source:
+    repoURL: https://github.com/ConductionNL/NL_doc.git
+    targetRevision: main
+    path: gitops/infra/rabbitmq-operator
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rabbitmq-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+

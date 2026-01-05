@@ -8,6 +8,31 @@ metadata:
 spec:
   project: nldoc
   sources:
+    # RabbitMQ cluster (requires rabbitmq-operator to be installed)
+    - repoURL: https://github.com/ConductionNL/NL_doc.git
+      targetRevision: main
+      path: gitops/infra/rabbitmq
+
+    # MinIO for S3 storage
+    - repoURL: https://charts.min.io
+      chart: minio
+      targetRevision: "5.2.0"
+      helm:
+        releaseName: minio
+        values: |
+          mode: standalone
+          replicas: 1
+          persistence:
+            enabled: true
+            size: 20Gi
+          resources:
+            requests:
+              memory: 512Mi
+          existingSecret: minio-credentials
+          buckets:
+            - name: nldoc
+              policy: none
+
     # editor-app chart
     - repoURL: https://gitlab.com/api/v4/projects/68643351/packages/helm/stable
       chart: editor-app
@@ -45,49 +70,79 @@ spec:
               nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
               nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
           amqp:
-            host: rabbitmq.nldoc.svc.cluster.local
-            username: nldoc
-            password: changeme
             queue:
               events: results
-          s3:
-            scheme: 'https://'
-            region: eu-west-1
-            host: s3.commonground.nu
-            port: 443
-            useSSL: "true"
-            accessKey: changeme
-            secretKey: changeme
+          extraEnvVars:
+            - name: AMQP_HOST
+              value: rabbitmq.nldoc.svc.cluster.local
+            - name: AMQP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-default-user
+                  key: username
+            - name: AMQP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-default-user
+                  key: password
+            - name: S3_HOST
+              value: minio.nldoc.svc.cluster.local
+            - name: S3_PORT
+              value: "9000"
+            - name: S3_USE_SSL
+              value: "false"
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootUser
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootPassword
 
-    # kimi chart
+    # kimi chart (minimal config)
     - repoURL: https://gitlab.com/api/v4/projects/68736728/packages/helm/stable
       chart: kimi
       targetRevision: "*"
       helm:
         releaseName: kimi
         values: |
-          amqp:
-            host: rabbitmq.nldoc.svc.cluster.local
-            username: nldoc
-            password: changeme
-          s3:
-            scheme: 'https://'
-            region: eu-west-1
-            host: s3.commonground.nu
-            port: 443
-            useSSL: "true"
-            accessKey: changeme
-            secretKey: changeme
           postgresql:
             host: nldoc-postgres.nldoc.svc.cluster.local
             port: 5432
             db: nldoc
-            existingSecret:
-              name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
-              usernameKey: username
-              passwordKey: password
             useSSL: "false"
           extraEnvVars:
+            - name: AMQP_HOST
+              value: rabbitmq.nldoc.svc.cluster.local
+            - name: AMQP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-default-user
+                  key: username
+            - name: AMQP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-default-user
+                  key: password
+            - name: S3_HOST
+              value: minio.nldoc.svc.cluster.local
+            - name: S3_PORT
+              value: "9000"
+            - name: S3_USE_SSL
+              value: "false"
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootUser
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootPassword
             - name: POSTGRESQL_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -100,13 +155,17 @@ spec:
                   key: password
           stations:
             "document-source":
-              resources: {}
-              resourcePreset: none
+              replicaCount: 1
+            "pdf-pages":
+              replicaCount: 1
+            "page-content":
               replicaCount: 1
           workers:
-            'elixir-workers':
-              resources: {}
-              resourcePreset: none
+            "elixir-workers":
+              replicaCount: 1
+            "pdf-page":
+              replicaCount: 1
+            "page-content":
               replicaCount: 1
 
     # PostgreSQL cluster (Zalando)
