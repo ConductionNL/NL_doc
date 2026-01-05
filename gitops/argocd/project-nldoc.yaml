@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nldoc
+  namespace: argocd
+spec:
+  description: NLDoc project
+  destinations:
+    - namespace: nldoc
+      server: https://kubernetes.default.svc
+    - namespace: cnpg-system
+      server: https://kubernetes.default.svc
+  sourceRepos:
+    - https://gitlab.com/logius/nldoc/getting-started.git
+    - https://cloudnative-pg.github.io/charts
+    - https://github.com/ConductionNL/NL_doc.git
+  clusterResourceWhitelist:
+    - group: 

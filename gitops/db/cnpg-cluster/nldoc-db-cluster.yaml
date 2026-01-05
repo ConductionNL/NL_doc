@@ -1,0 +1,27 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: nldoc-db
+  namespace: nldoc
+spec:
+  instances: 3
+  nodeSelector:
+    role: prod-data
+  tolerations:
+    - key: "db-only"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  storage:
+    size: 20Gi
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: nldoc-db-superuser
+  bootstrap:
+    initdb:
+      database: nldoc
+      owner: nldoc
+      secret:
+        name: nldoc-db-app
+  monitoring:
+    enablePodMonitor: true
