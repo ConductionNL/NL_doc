@@ -82,9 +82,22 @@ spec:
             host: nldoc-postgres.nldoc.svc.cluster.local
             port: 5432
             db: nldoc
-            username: nldoc
-            password: changeme
+            existingSecret:
+              name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+              usernameKey: username
+              passwordKey: password
             useSSL: "false"
+          extraEnvVars:
+            - name: POSTGRESQL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                  key: username
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                  key: password
           stations:
             "document-source":
               resources: {}
