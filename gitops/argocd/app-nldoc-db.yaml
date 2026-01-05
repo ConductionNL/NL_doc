@@ -9,12 +9,12 @@ metadata:
 spec:
   project: nldoc
   source:
-    repoURL: https://github.com/ConductionNL/NL_doc.git
+    repoURL: https://github.com/ConductionNL/Cloud_pgAdmin.git
     targetRevision: main
-    path: gitops/db/cnpg-cluster
+    path: cnpg/nldoc-db
   destination:
     server: https://kubernetes.default.svc
-    namespace: nldoc
+    namespace: nldoc-data
   syncPolicy:
     automated:
       prune: true
