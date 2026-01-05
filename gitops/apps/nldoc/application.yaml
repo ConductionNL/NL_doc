@@ -53,7 +53,7 @@ spec:
             - name: API_URL
               value: https://api.nldoc.commonground.nu
 
-    # api chart
+    # api chart - uses native chart values
     - repoURL: https://gitlab.com/api/v4/projects/68640094/packages/helm/stable
       chart: api
       targetRevision: "*"
@@ -70,89 +70,44 @@ spec:
               nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
               nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
           amqp:
+            host: rabbitmq.nldoc.svc.cluster.local
+            username: guest
+            password: guest
             queue:
               events: results
-          extraEnvVars:
-            - name: AMQP_HOST
-              value: rabbitmq.nldoc.svc.cluster.local
-            - name: AMQP_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: rabbitmq-default-user
-                  key: username
-            - name: AMQP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: rabbitmq-default-user
-                  key: password
-            - name: S3_HOST
-              value: minio.nldoc.svc.cluster.local
-            - name: S3_PORT
-              value: "9000"
-            - name: S3_USE_SSL
-              value: "false"
-            - name: S3_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: rootUser
-            - name: S3_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: rootPassword
+          s3:
+            scheme: 'http://'
+            host: minio.nldoc.svc.cluster.local
+            port: 9000
+            useSSL: "false"
+            accessKey: minioadmin
+            secretKey: minio-nldoc-secret-2026
 
-    # kimi chart (minimal config)
+    # kimi chart (minimal config) - uses native chart values
     - repoURL: https://gitlab.com/api/v4/projects/68736728/packages/helm/stable
       chart: kimi
       targetRevision: "*"
       helm:
         releaseName: kimi
         values: |
+          amqp:
+            host: rabbitmq.nldoc.svc.cluster.local
+            username: guest
+            password: guest
+          s3:
+            scheme: 'http://'
+            host: minio.nldoc.svc.cluster.local
+            port: 9000
+            useSSL: "false"
+            accessKey: minioadmin
+            secretKey: minio-nldoc-secret-2026
           postgresql:
             host: nldoc-postgres.nldoc.svc.cluster.local
             port: 5432
             db: nldoc
+            username: nldoc
+            password: temp-will-be-patched
             useSSL: "false"
-          extraEnvVars:
-            - name: AMQP_HOST
-              value: rabbitmq.nldoc.svc.cluster.local
-            - name: AMQP_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: rabbitmq-default-user
-                  key: username
-            - name: AMQP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: rabbitmq-default-user
-                  key: password
-            - name: S3_HOST
-              value: minio.nldoc.svc.cluster.local
-            - name: S3_PORT
-              value: "9000"
-            - name: S3_USE_SSL
-              value: "false"
-            - name: S3_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: rootUser
-            - name: S3_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: rootPassword
-            - name: POSTGRESQL_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
-                  key: username
-            - name: POSTGRESQL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
-                  key: password
           stations:
             "document-source":
               replicaCount: 1
