@@ -5,30 +5,17 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    argocd.argoproj.io/sync-options: CreateNamespace=true
 spec:
   project: nldoc
-  source:
-    repoURL: https://gitlab.com/logius/nldoc/getting-started.git
-    targetRevision: main
-    path: kubernetes/helm
-    helm:
-      values: |
-        ingress:
-          enabled: true
-          className: nginx
-          annotations:
-            cert-manager.io/cluster-issuer: letsencrypt-prod
-            external-dns.alpha.kubernetes.io/hostname: nldoc.commonground.nu
-            nginx.ingress.kubernetes.io/auth-type: "basic"
-            nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
-            nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
-          hosts:
-            - host: nldoc.commonground.nu
-              paths: ["/"]
-          tls:
-            - secretName: nldoc-tls
-              hosts: ["nldoc.commonground.nu"]
+  sources:
+    - repoURL: https://gitlab.com/logius/nldoc/getting-started.git
+      targetRevision: main
+      path: kubernetes/helm
+      directory:
+        recurse: true
+    - repoURL: git@github.com:ConductionNL/gitops-postgres.git
+      targetRevision: main
+      path: nldoc-postgres
   destination:
     server: https://kubernetes.default.svc
     namespace: nldoc
@@ -36,3 +23,5 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

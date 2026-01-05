@@ -14,5 +14,7 @@ spec:
     - https://gitlab.com/logius/nldoc/getting-started.git
     - https://cloudnative-pg.github.io/charts
     - https://github.com/ConductionNL/NL_doc.git
+    - git@github.com:ConductionNL/gitops-postgres.git
   clusterResourceWhitelist:
-    - group: 
+    - group: '*'
+      kind: '*'
