@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nldoc
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-options: CreateNamespace=true
+spec:
+  project: nldoc
+  source:
+    repoURL: https://gitlab.com/logius/nldoc/getting-started.git
+    targetRevision: main
+    path: kubernetes/helm
+    helm:
+      values: |
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            external-dns.alpha.kubernetes.io/hostname: nldoc.commonground.nu
+            nginx.ingress.kubernetes.io/auth-type: "basic"
+            nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
+            nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+          hosts:
+            - host: nldoc.commonground.nu
+              paths: ["/"]
+          tls:
+            - secretName: nldoc-tls
+              hosts: ["nldoc.commonground.nu"]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nldoc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
