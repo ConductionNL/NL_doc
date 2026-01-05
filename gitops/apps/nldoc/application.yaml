@@ -9,7 +9,7 @@ spec:
   project: nldoc
   sources:
     # RabbitMQ cluster (requires rabbitmq-operator to be installed)
-    - repoURL: https://github.com/ConductionNL/NL_doc.git
+    - repoURL: git@github.com:ConductionNL/NL_doc.git
       targetRevision: main
       path: gitops/infra/rabbitmq
 
