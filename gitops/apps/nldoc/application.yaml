@@ -8,14 +8,99 @@ metadata:
 spec:
   project: nldoc
   sources:
-    - repoURL: https://gitlab.com/logius/nldoc/getting-started.git
-      targetRevision: main
-      path: kubernetes/helm
-      directory:
-        recurse: true
+    # editor-app chart
+    - repoURL: https://gitlab.com/api/v4/projects/68643351/packages/helm/stable
+      chart: editor-app
+      targetRevision: "*"
+      helm:
+        releaseName: editor-app
+        values: |
+          ingress:
+            enabled: true
+            tls: true
+            hostname: editor.nldoc.commonground.nu
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+              nginx.ingress.kubernetes.io/auth-type: "basic"
+              nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
+              nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+          extraEnvVars:
+            - name: API_URL
+              value: https://api.nldoc.commonground.nu
+
+    # api chart
+    - repoURL: https://gitlab.com/api/v4/projects/68640094/packages/helm/stable
+      chart: api
+      targetRevision: "*"
+      helm:
+        releaseName: api
+        values: |
+          ingress:
+            enabled: true
+            tls: true
+            hostname: api.nldoc.commonground.nu
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+              nginx.ingress.kubernetes.io/auth-type: "basic"
+              nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
+              nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+          amqp:
+            host: rabbitmq.nldoc.svc.cluster.local
+            username: nldoc
+            password: changeme
+            queue:
+              events: results
+          s3:
+            scheme: 'https://'
+            region: eu-west-1
+            host: s3.commonground.nu
+            port: 443
+            useSSL: "true"
+            accessKey: changeme
+            secretKey: changeme
+
+    # kimi chart
+    - repoURL: https://gitlab.com/api/v4/projects/68736728/packages/helm/stable
+      chart: kimi
+      targetRevision: "*"
+      helm:
+        releaseName: kimi
+        values: |
+          amqp:
+            host: rabbitmq.nldoc.svc.cluster.local
+            username: nldoc
+            password: changeme
+          s3:
+            scheme: 'https://'
+            region: eu-west-1
+            host: s3.commonground.nu
+            port: 443
+            useSSL: "true"
+            accessKey: changeme
+            secretKey: changeme
+          postgresql:
+            host: nldoc-postgres.nldoc.svc.cluster.local
+            port: 5432
+            db: nldoc
+            username: nldoc
+            password: changeme
+            useSSL: "false"
+          stations:
+            "document-source":
+              resources: {}
+              resourcePreset: none
+              replicaCount: 1
+          workers:
+            'elixir-workers':
+              resources: {}
+              resourcePreset: none
+              replicaCount: 1
+
+    # PostgreSQL cluster (Zalando)
     - repoURL: git@github.com:ConductionNL/gitops-postgres.git
       targetRevision: main
       path: nldoc-postgres
+
   destination:
     server: https://kubernetes.default.svc
     namespace: nldoc
