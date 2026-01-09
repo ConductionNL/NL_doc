@@ -33,6 +33,11 @@ spec:
             - name: nldoc
               policy: none
 
+    # Standalone PVC for MinIO (bound via persistence.existingClaim)
+    - repoURL: git@github.com:ConductionNL/NL_doc.git
+      targetRevision: main
+      path: gitops/infra/minio
+
     # editor-app manifests (vendored)
     - repoURL: git@github.com:ConductionNL/NL_doc.git
       targetRevision: main
