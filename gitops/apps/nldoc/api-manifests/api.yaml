@@ -17,6 +17,8 @@ kind: Deployment
 metadata:
   name: nldoc-api
   namespace: nldoc
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   replicas: 1
   selector:
