@@ -34,17 +34,17 @@ spec:
               policy: none
 
     # editor-app manifests (vendored)
-    - repoURL: https://github.com/ConductionNL/NL_doc.git
+    - repoURL: git@github.com:ConductionNL/NL_doc.git
       targetRevision: main
       path: gitops/apps/nldoc/editor-manifests
 
     # api manifests (vendored)
-    - repoURL: https://github.com/ConductionNL/NL_doc.git
+    - repoURL: git@github.com:ConductionNL/NL_doc.git
       targetRevision: main
       path: gitops/apps/nldoc/api-manifests
 
     # kimi manifests (vendored from cluster) - remove GitLab dependency
-    - repoURL: https://github.com/ConductionNL/NL_doc.git
+    - repoURL: git@github.com:ConductionNL/NL_doc.git
       targetRevision: main
       path: gitops/apps/nldoc/kimi-manifests
 
