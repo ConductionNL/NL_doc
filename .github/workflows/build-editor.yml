@@ -46,8 +46,8 @@ jobs:
       - name: Build and push editor image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: .github/editor.Dockerfile
+          context: editor-src
+          file: editor-src/Dockerfile
           push: true
           tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-editor:${{ github.event.inputs.image_tag || 'latest' }}
           build-args: |
