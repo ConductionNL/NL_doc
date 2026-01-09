@@ -43,11 +43,6 @@ spec:
       targetRevision: main
       path: gitops/apps/nldoc/api-manifests
 
-    # kimi manifests (vendored from cluster) - remove GitLab dependency
-    - repoURL: git@github.com:ConductionNL/NL_doc.git
-      targetRevision: main
-      path: gitops/apps/nldoc/kimi-manifests
-
     # PostgreSQL cluster (Zalando)
     - repoURL: git@github.com:ConductionNL/gitops-postgres.git
       targetRevision: main
