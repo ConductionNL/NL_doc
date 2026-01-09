@@ -24,6 +24,8 @@ spec:
           replicas: 1
           persistence:
             enabled: true
+            existingClaim: minio
+            storageClass: default
             size: 20Gi
           resources:
             requests:

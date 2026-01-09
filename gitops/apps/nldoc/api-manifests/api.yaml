@@ -38,9 +38,9 @@ spec:
             - name: AMQP__HOST
               value: rabbitmq.nldoc.svc.cluster.local
             - name: AMQP__USERNAME
-              value: guest
+              value: default_user_2lASi8JBXOeWIoYLdKh
             - name: AMQP__PASSWORD
-              value: guest
+              value: OOb0SChx5zao_ODIJwmY5FznaGpAs60O
             - name: AMQP__QUEUE__EVENTS
               value: results
             - name: S3__SCHEME
