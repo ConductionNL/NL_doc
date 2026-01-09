@@ -50,7 +50,7 @@ spec:
       - env:
         - name: API_URL
           value: https://api.nldoc.commonground.nu
-        image: registry.gitlab.com/logius/nldoc/web/editor:2.13.3
+        image: ghcr.io/conductionnl/nldoc-editor:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
           failureThreshold: 6
