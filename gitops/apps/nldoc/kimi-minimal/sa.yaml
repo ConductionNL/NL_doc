@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: List
+items:
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-station--document-source
+    namespace: nldoc
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-station--pdf-pages
+    namespace: nldoc
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-station--page-content
+    namespace: nldoc
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-worker--pdf-page
+    namespace: nldoc
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-worker--page-content
+    namespace: nldoc
+
+

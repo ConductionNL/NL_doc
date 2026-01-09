@@ -1,0 +1,541 @@
+apiVersion: v1
+kind: List
+items:
+# Station: document-source
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: kimi-station-document-source
+    labels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: station.document-source
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: station.document-source
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: kimi
+          app.kubernetes.io/instance: kimi
+          app.kubernetes.io/component: station.document-source
+      spec:
+        serviceAccountName: kimi-station--document-source
+        automountServiceAccountToken: false
+        securityContext:
+          fsGroup: 1001
+          fsGroupChangePolicy: Always
+        containers:
+        - name: station
+          image: registry.gitlab.com/logius/nldoc/worker/stations:13.0.1
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: AMQP_HOST
+            value: rabbitmq.nldoc.svc.cluster.local
+          - name: AMQP_PROTOCOL
+            value: amqp
+          - name: AMQP_PORT
+            value: "5672"
+          - name: AMQP_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_PASS
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: AMQP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: STATION_CONFIGURATION
+            value: |
+              {"input":{"type":"document"},"output":{"attribute":{"name":"source","type":"file"},"type":"output"},"workerResult":"fileWorkerResult"}
+          - name: POSTGRES_HOST
+            value: nldoc-postgres.nldoc.svc.cluster.local
+          - name: POSTGRES_PORT
+            value: "5432"
+          - name: POSTGRES_DB
+            value: nldoc
+          - name: POSTGRES_USER
+            value: station
+          - name: POSTGRES_SCHEMA
+            value: public
+          - name: POSTGRES_SSL
+            value: verify-full
+          - name: POSTGRES_POOL_SIZE
+            value: "20"
+          - name: POSTGRESQL_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 150m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+            subPath: tmp-dir
+        volumes:
+        - name: tmp
+          emptyDir: {}
+
+# Station: pdf-pages
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: kimi-station-pdf-pages
+    labels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: station.pdf-pages
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: station.pdf-pages
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: kimi
+          app.kubernetes.io/instance: kimi
+          app.kubernetes.io/component: station.pdf-pages
+      spec:
+        serviceAccountName: kimi-station--pdf-pages
+        automountServiceAccountToken: false
+        securityContext:
+          fsGroup: 1001
+          fsGroupChangePolicy: Always
+        containers:
+        - name: station
+          image: registry.gitlab.com/logius/nldoc/worker/stations:13.0.1
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: AMQP_HOST
+            value: rabbitmq.nldoc.svc.cluster.local
+          - name: AMQP_PROTOCOL
+            value: amqp
+          - name: AMQP_PORT
+            value: "5672"
+          - name: AMQP_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_PASS
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: AMQP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: STATION_CONFIGURATION
+            value: |
+              {"input":{"requiredAttributes":[{"behavior":"await_all","name":"pageCount"}],"type":"pdf"},"output":{"split":{"countAttribute":"pageCount","entityType":"page","indexing":"one-based"},"type":"split"}}
+          - name: POSTGRES_HOST
+            value: nldoc-postgres.nldoc.svc.cluster.local
+          - name: POSTGRES_PORT
+            value: "5432"
+          - name: POSTGRES_DB
+            value: nldoc
+          - name: POSTGRES_USER
+            value: nldoc
+          - name: POSTGRES_PASSWORD
+            value: changeme
+          - name: POSTGRES_SCHEMA
+            value: public
+          - name: POSTGRES_SSL
+            value: verify-full
+          - name: POSTGRES_POOL_SIZE
+            value: "20"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 150m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+            subPath: tmp-dir
+        volumes:
+        - name: tmp
+          emptyDir: {}
+
+# Station: page-content
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: kimi-station-page-content
+    labels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: station.page-content
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: station.page-content
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: kimi
+          app.kubernetes.io/instance: kimi
+          app.kubernetes.io/component: station.page-content
+      spec:
+        serviceAccountName: kimi-station--page-content
+        automountServiceAccountToken: false
+        securityContext:
+          fsGroup: 1001
+          fsGroupChangePolicy: Always
+        containers:
+        - name: station
+          image: registry.gitlab.com/logius/nldoc/worker/stations:13.0.1
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: AMQP_HOST
+            value: rabbitmq.nldoc.svc.cluster.local
+          - name: AMQP_PROTOCOL
+            value: amqp
+          - name: AMQP_PORT
+            value: "5672"
+          - name: AMQP_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_PASS
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: AMQP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: STATION_CONFIGURATION
+            value: |
+              {"input":{"parentType":"folio","requiredAttributes":[{"behavior":"await_all","name":"pageImage"},{"behavior":"await_all","name":"interpretedContent"},{"behavior":"await_all","name":"regions"}],"type":"page"},"output":{"attribute":{"name":"content","type":"array"},"type":"attribute"},"workerResult":"fileWorkerResult"}
+          - name: POSTGRES_HOST
+            value: nldoc-postgres.nldoc.svc.cluster.local
+          - name: POSTGRES_PORT
+            value: "5432"
+          - name: POSTGRES_DB
+            value: nldoc
+          - name: POSTGRES_USER
+            value: station
+          - name: POSTGRES_SCHEMA
+            value: public
+          - name: POSTGRES_SSL
+            value: verify-full
+          - name: POSTGRES_POOL_SIZE
+            value: "20"
+          - name: POSTGRESQL_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 150m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+            subPath: tmp-dir
+        volumes:
+        - name: tmp
+          emptyDir: {}
+
+# Worker: pdf-page
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: kimi-worker-pdf-page
+    labels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: worker.pdf-page
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: worker.pdf-page
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: kimi
+          app.kubernetes.io/instance: kimi
+          app.kubernetes.io/component: worker.pdf-page
+      spec:
+        serviceAccountName: kimi-worker--pdf-page
+        automountServiceAccountToken: false
+        securityContext:
+          fsGroup: 1001
+          fsGroupChangePolicy: Always
+        containers:
+        - name: worker
+          image: registry.gitlab.com/logius/nldoc/worker/pdf-pages:2.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: AMQP_HOST
+            value: rabbitmq.nldoc.svc.cluster.local
+          - name: AMQP_PROTOCOL
+            value: amqp
+          - name: AMQP_PORT
+            value: "5672"
+          - name: AMQP_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_PASS
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: AMQP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: S3_REGION
+            value: us-east-1
+          - name: S3_HOST
+            value: minio
+          - name: S3_PORT
+            value: "9000"
+          - name: S3_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: rootUser
+          - name: S3_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: rootPassword
+          - name: S3_USE_SSL
+            value: "false"
+          - name: S3_SCHEME
+            value: http
+          - name: S3_FORCE_PATH_STYLE
+            value: "true"
+          - name: POSTGRESQL_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 150m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+            subPath: tmp-dir
+        volumes:
+        - name: tmp
+          emptyDir: {}
+
+# Worker: page-content
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: kimi-worker-page-content
+    labels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: worker.page-content
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: worker.page-content
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: kimi
+          app.kubernetes.io/instance: kimi
+          app.kubernetes.io/component: worker.page-content
+      spec:
+        serviceAccountName: kimi-worker--page-content
+        automountServiceAccountToken: false
+        securityContext:
+          fsGroup: 1001
+          fsGroupChangePolicy: Always
+        containers:
+        - name: worker
+          image: registry.gitlab.com/logius/nldoc/worker/page-content:3.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: AMQP_HOST
+            value: rabbitmq.nldoc.svc.cluster.local
+          - name: AMQP_PROTOCOL
+            value: amqp
+          - name: AMQP_PORT
+            value: "5672"
+          - name: AMQP_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: username
+          - name: AMQP_PASS
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: AMQP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmq-default-user
+                key: password
+          - name: S3_REGION
+            value: us-east-1
+          - name: S3_HOST
+            value: minio
+          - name: S3_PORT
+            value: "9000"
+          - name: S3_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: rootUser
+          - name: S3_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: rootPassword
+          - name: S3_USE_SSL
+            value: "false"
+          - name: S3_SCHEME
+            value: http
+          - name: S3_FORCE_PATH_STYLE
+            value: "true"
+          - name: POSTGRESQL_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 150m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+          volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+            subPath: tmp-dir
+        volumes:
+        - name: tmp
+          emptyDir: {}
+
+

@@ -48,6 +48,11 @@ spec:
       targetRevision: main
       path: gitops/apps/nldoc/api-manifests
 
+    # minimal kimi manifests (stations + workers)
+    - repoURL: git@github.com:ConductionNL/NL_doc.git
+      targetRevision: main
+      path: gitops/apps/nldoc/kimi-minimal
+
     # PostgreSQL cluster (Zalando)
     - repoURL: git@github.com:ConductionNL/gitops-postgres.git
       targetRevision: main
