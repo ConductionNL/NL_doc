@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    argocd.argoproj.io/tracking-id: nldoc:apps/Deployment:nldoc/editor-app
+  creationTimestamp: "2026-01-05T14:41:41Z"
+  generation: 1
+  labels:
+    app.kubernetes.io/instance: editor-app
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: editor-app
+    app.kubernetes.io/version: 2.13.3
+    helm.sh/chart: editor-app-2.13.3
+  name: editor-app
+  namespace: nldoc
+  resourceVersion: "135848845"
+  uid: 730dc250-0b8e-42b9-a2c6-6ce9b97f8d64
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: editor-app
+      app.kubernetes.io/name: editor-app
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app.kubernetes.io/instance: editor-app
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: editor-app
+        app.kubernetes.io/version: 2.13.3
+        helm.sh/chart: editor-app-2.13.3
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/instance: editor-app
+                  app.kubernetes.io/name: editor-app
+              topologyKey: kubernetes.io/hostname
+            weight: 1
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: API_URL
+          value: https://api.nldoc.commonground.nu
+        image: registry.gitlab.com/logius/nldoc/web/nldoc.nl:2.13.3
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 6
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: http
+          timeoutSeconds: 5
+        name: editor-app
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: 150m
+            ephemeral-storage: 2Gi
+            memory: 192Mi
+          requests:
+            cpu: 100m
+            ephemeral-storage: 50Mi
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: true
+          runAsGroup: 1001
+          runAsNonRoot: true
+          runAsUser: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+      serviceAccount: editor-app
+      serviceAccountName: editor-app
+      shareProcessNamespace: false
+      terminationGracePeriodSeconds: 30
+status:
+  availableReplicas: 1
+  conditions:
+  - lastTransitionTime: "2026-01-05T14:41:56Z"
+    lastUpdateTime: "2026-01-05T14:41:56Z"
+    message: Deployment has minimum availability.
+    reason: MinimumReplicasAvailable
+    status: "True"
+    type: Available
+  - lastTransitionTime: "2026-01-05T14:41:41Z"
+    lastUpdateTime: "2026-01-05T14:41:56Z"
+    message: ReplicaSet "editor-app-56d7dc9f66" has successfully progressed.
+    reason: NewReplicaSetAvailable
+    status: "True"
+    type: Progressing
+  observedGeneration: 1
+  readyReplicas: 1
+  replicas: 1
+  updatedReplicas: 1

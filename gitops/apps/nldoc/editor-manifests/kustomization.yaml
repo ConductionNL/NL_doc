@@ -4,5 +4,6 @@ namespace: nldoc
 resources:
   - editor.yaml
   - nldoc-basic-auth-secret.yaml
+  - editor-deployment.yaml
 
 
