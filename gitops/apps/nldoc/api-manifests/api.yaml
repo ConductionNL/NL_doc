@@ -70,7 +70,7 @@ spec:
               value: "results"
             # S3
             - name: S3__SCHEME
-              value: "http://"
+              value: "http"
             - name: S3__HOST
               value: minio.nldoc.svc.cluster.local
             - name: S3__PORT
@@ -78,9 +78,34 @@ spec:
             - name: S3__USESSL
               value: "false"
             - name: S3__ACCESSKEY
-              value: minioadmin
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootUser
             - name: S3__SECRETKEY
-              value: minio-nldoc-secret-2026
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootPassword
+            # Single-underscore variants for runtime compatibility
+            - name: S3_SCHEME
+              value: "http"
+            - name: S3_HOST
+              value: minio.nldoc.svc.cluster.local
+            - name: S3_PORT
+              value: "9000"
+            - name: S3_USE_SSL
+              value: "false"
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootUser
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: rootPassword
           resources:
             requests:
               cpu: 100m
