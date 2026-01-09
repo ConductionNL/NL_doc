@@ -35,27 +35,27 @@ spec:
             - containerPort: 8080
               name: http
           env:
-            - name: AMQP__HOST
+            # AMQP env keys as expected by NLdoc.API runtime.exs
+            - name: AMQP_HOST
               value: rabbitmq.nldoc.svc.cluster.local
-            - name: AMQP__USERNAME
+            - name: AMQP_PORT
+              value: "5672"
+            - name: AMQP_USERNAME
               value: default_user_2lASi8JBXOeWIoYLdKh
-            - name: AMQP__PASSWORD
+            - name: AMQP_PASSWORD
               value: OOb0SChx5zao_ODIJwmY5FznaGpAs60O
-            - name: AMQP__URI
-              value: amqp://default_user_2lASi8JBXOeWIoYLdKh:OOb0SChx5zao_ODIJwmY5FznaGpAs60O@rabbitmq.nldoc.svc.cluster.local:5672/
-            - name: AMQP__QUEUE__EVENTS
-              value: results
-            - name: S3__SCHEME
-              value: http://
-            - name: S3__HOST
+            - name: AMQP_QUEUE_EVENT
+              value: "results"
+            # S3 env keys as expected by NLdoc.API runtime.exs
+            - name: S3_SCHEME
+              value: "http"
+            - name: S3_HOST
               value: minio.nldoc.svc.cluster.local
-            - name: S3__PORT
+            - name: S3_PORT
               value: "9000"
-            - name: S3__USESSL
-              value: "false"
-            - name: S3__ACCESSKEY
+            - name: S3_ACCESS_KEY
               value: minioadmin
-            - name: S3__SECRETKEY
+            - name: S3_SECRET_KEY
               value: minio-nldoc-secret-2026
           resources:
             requests:
