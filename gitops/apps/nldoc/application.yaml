@@ -47,6 +47,8 @@ spec:
     - repoURL: git@github.com:ConductionNL/NL_doc.git
       targetRevision: main
       path: gitops/apps/nldoc/kimi-manifests
+      kustomize:
+        buildOptions: --load-restrictor=LoadRestrictionsNone
 
     # PostgreSQL cluster (Zalando)
     - repoURL: git@github.com:ConductionNL/gitops-postgres.git
