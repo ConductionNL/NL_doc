@@ -1,6 +1,9 @@
 name: Build and publish NLdoc Editor image
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       ref:
