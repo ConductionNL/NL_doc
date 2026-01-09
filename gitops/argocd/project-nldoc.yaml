@@ -16,7 +16,9 @@ spec:
     - https://gitlab.com/logius/nldoc/getting-started.git
     - https://cloudnative-pg.github.io/charts
     - git@github.com:ConductionNL/NL_doc.git
+    - https://github.com/ConductionNL/NL_doc.git
     - git@github.com:ConductionNL/gitops-postgres.git
+    - https://github.com/ConductionNL/gitops-postgres.git
     - https://gitlab.com/api/v4/projects/68736728/packages/helm/stable
     - https://gitlab.com/api/v4/projects/68643351/packages/helm/stable
     - https://gitlab.com/api/v4/projects/68640094/packages/helm/stable
