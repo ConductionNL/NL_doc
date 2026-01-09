@@ -41,6 +41,8 @@ spec:
               value: default_user_2lASi8JBXOeWIoYLdKh
             - name: AMQP__PASSWORD
               value: OOb0SChx5zao_ODIJwmY5FznaGpAs60O
+            - name: AMQP__URI
+              value: amqp://default_user_2lASi8JBXOeWIoYLdKh:OOb0SChx5zao_ODIJwmY5FznaGpAs60O@rabbitmq.nldoc.svc.cluster.local:5672/
             - name: AMQP__QUEUE__EVENTS
               value: results
             - name: S3__SCHEME

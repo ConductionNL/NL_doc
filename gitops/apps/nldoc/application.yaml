@@ -25,8 +25,6 @@ spec:
           persistence:
             enabled: true
             existingClaim: minio
-            storageClass: default
-            size: 20Gi
           resources:
             requests:
               memory: 512Mi
@@ -59,7 +57,6 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - Replace=true
   ignoreDifferences:
     - group: ""
       kind: Pod
