@@ -25,6 +25,9 @@ jobs:
     steps:
       - name: Checkout NL_doc repo
         uses: actions/checkout@v4
+      - name: Compute lowercase owner
+        shell: bash
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
       - name: Clone editor source
         run: |
@@ -46,7 +49,7 @@ jobs:
           context: .
           file: .github/editor.Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/nldoc-editor:${{ github.event.inputs.image_tag || 'latest' }}
+          tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-editor:${{ github.event.inputs.image_tag || 'latest' }}
           build-args: |
             NODE_ENV=production
           provenance: false
