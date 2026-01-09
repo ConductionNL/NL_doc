@@ -11,6 +11,7 @@ RUN set -eux; \
     corepack enable || true; corepack prepare pnpm@latest --activate || true; \
     if [ -f pnpm-lock.yaml ]; then \
       pnpm install --frozen-lockfile; \
+      pnpm -r build; \
       pnpm --filter @nldoc/demo build; \
     else \
       cd packages/demo; \
