@@ -33,10 +33,10 @@ spec:
             - name: nldoc
               policy: none
 
-    # editor-app chart
-    - repoURL: https://gitlab.com/api/v4/projects/68643351/packages/helm/stable
-      chart: editor-app
-      targetRevision: "*"
+    # editor-app chart (from our GitHub repo path)
+    - repoURL: https://github.com/ConductionNL/NL_doc.git
+      targetRevision: main
+      path: charts/editor-app
       helm:
         releaseName: editor-app
         values: |
@@ -53,10 +53,10 @@ spec:
             - name: API_URL
               value: https://api.nldoc.commonground.nu
 
-    # api chart - uses native chart values
-    - repoURL: https://gitlab.com/api/v4/projects/68640094/packages/helm/stable
-      chart: api
-      targetRevision: "*"
+    # api chart (from our GitHub repo path)
+    - repoURL: https://github.com/ConductionNL/NL_doc.git
+      targetRevision: main
+      path: charts/api
       helm:
         releaseName: api
         values: |
@@ -83,45 +83,10 @@ spec:
             accessKey: minioadmin
             secretKey: minio-nldoc-secret-2026
 
-    # kimi chart (minimal config) - uses native chart values
-    - repoURL: https://gitlab.com/api/v4/projects/68736728/packages/helm/stable
-      chart: kimi
-      targetRevision: "*"
-      helm:
-        releaseName: kimi
-        values: |
-          amqp:
-            host: rabbitmq.nldoc.svc.cluster.local
-            username: default_user_2lASi8JBXOeWIoYLdKh
-            password: OOb0SChx5zao_ODIJwmY5FznaGpAs60O
-          s3:
-            scheme: 'http://'
-            host: minio.nldoc.svc.cluster.local
-            port: 9000
-            useSSL: "false"
-            accessKey: minioadmin
-            secretKey: minio-nldoc-secret-2026
-          postgresql:
-            host: nldoc-postgres.nldoc.svc.cluster.local
-            port: 5432
-            db: nldoc
-            username: nldoc
-            password: 6Xu7BzJTOzFiEsb6L13AiflLaUQsEVJjtIiZkAijZHV6vl6JSJsaMEhny4heyYfW
-            useSSL: "false"
-          stations:
-            "document-source":
-              replicaCount: 1
-            "pdf-pages":
-              replicaCount: 1
-            "page-content":
-              replicaCount: 1
-          workers:
-            "elixir-workers":
-              replicaCount: 1
-            "pdf-page":
-              replicaCount: 1
-            "page-content":
-              replicaCount: 1
+    # kimi manifests (vendored from cluster) - remove GitLab dependency
+    - repoURL: https://github.com/ConductionNL/NL_doc.git
+      targetRevision: main
+      path: gitops/apps/nldoc/kimi-manifests
 
     # PostgreSQL cluster (Zalando)
     - repoURL: git@github.com:ConductionNL/gitops-postgres.git
