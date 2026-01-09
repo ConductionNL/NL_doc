@@ -12,39 +12,6 @@ spec:
       protocol: TCP
       name: http
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: editor-app
-  namespace: nldoc
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: editor-app
-  template:
-    metadata:
-      labels:
-        app: editor-app
-    spec:
-      containers:
-        - name: editor
-          image: registry.gitlab.com/logius/nldoc/web/editor:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 3000
-              name: http
-          env:
-            - name: API_URL
-              value: https://api.nldoc.commonground.nu
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
