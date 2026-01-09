@@ -63,3 +63,12 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - Replace=true
+  ignoreDifferences:
+    - group: ""
+      kind: Pod
+    - group: apps
+      kind: ReplicaSet
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec
