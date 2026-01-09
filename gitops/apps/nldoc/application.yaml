@@ -92,8 +92,8 @@ spec:
         values: |
           amqp:
             host: rabbitmq.nldoc.svc.cluster.local
-            username: guest
-            password: guest
+            username: default_user_2lASi8JBXOeWIoYLdKh
+            password: OOb0SChx5zao_ODIJwmY5FznaGpAs60O
           s3:
             scheme: 'http://'
             host: minio.nldoc.svc.cluster.local
@@ -106,7 +106,7 @@ spec:
             port: 5432
             db: nldoc
             username: nldoc
-            password: temp-will-be-patched
+            password: 6Xu7BzJTOzFiEsb6L13AiflLaUQsEVJjtIiZkAijZHV6vl6JSJsaMEhny4heyYfW
             useSSL: "false"
           stations:
             "document-source":
