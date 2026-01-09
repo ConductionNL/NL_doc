@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nldoc-api
+  namespace: nldoc
+spec:
+  selector:
+    app: nldoc-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nldoc-api
+  namespace: nldoc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nldoc-api
+  template:
+    metadata:
+      labels:
+        app: nldoc-api
+    spec:
+      containers:
+        - name: api
+          image: registry.gitlab.com/logius/nldoc/web/nldoc_api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: AMQP__HOST
+              value: rabbitmq.nldoc.svc.cluster.local
+            - name: AMQP__USERNAME
+              value: guest
+            - name: AMQP__PASSWORD
+              value: guest
+            - name: AMQP__QUEUE__EVENTS
+              value: results
+            - name: S3__SCHEME
+              value: http://
+            - name: S3__HOST
+              value: minio.nldoc.svc.cluster.local
+            - name: S3__PORT
+              value: "9000"
+            - name: S3__USESSL
+              value: "false"
+            - name: S3__ACCESSKEY
+              value: minioadmin
+            - name: S3__SECRETKEY
+              value: minio-nldoc-secret-2026
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nldoc-api
+  namespace: nldoc
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/auth-type: "basic"
+    nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.nldoc.commonground.nu
+      secretName: api-tls
+  rules:
+    - host: api.nldoc.commonground.nu
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nldoc-api
+                port:
+                  number: 80
+
+

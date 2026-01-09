@@ -33,55 +33,15 @@ spec:
             - name: nldoc
               policy: none
 
-    # editor-app chart (from our GitHub repo path)
+    # editor-app manifests (vendored)
     - repoURL: https://github.com/ConductionNL/NL_doc.git
       targetRevision: main
-      path: charts/editor-app
-      helm:
-        releaseName: editor-app
-        values: |
-          ingress:
-            enabled: true
-            tls: true
-            hostname: editor.nldoc.commonground.nu
-            annotations:
-              cert-manager.io/cluster-issuer: letsencrypt-prod
-              nginx.ingress.kubernetes.io/auth-type: "basic"
-              nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
-              nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
-          extraEnvVars:
-            - name: API_URL
-              value: https://api.nldoc.commonground.nu
+      path: gitops/apps/nldoc/editor-manifests
 
-    # api chart (from our GitHub repo path)
+    # api manifests (vendored)
     - repoURL: https://github.com/ConductionNL/NL_doc.git
       targetRevision: main
-      path: charts/api
-      helm:
-        releaseName: api
-        values: |
-          ingress:
-            enabled: true
-            tls: true
-            hostname: api.nldoc.commonground.nu
-            annotations:
-              cert-manager.io/cluster-issuer: letsencrypt-prod
-              nginx.ingress.kubernetes.io/auth-type: "basic"
-              nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
-              nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
-          amqp:
-            host: rabbitmq.nldoc.svc.cluster.local
-            username: guest
-            password: guest
-            queue:
-              events: results
-          s3:
-            scheme: 'http://'
-            host: minio.nldoc.svc.cluster.local
-            port: 9000
-            useSSL: "false"
-            accessKey: minioadmin
-            secretKey: minio-nldoc-secret-2026
+      path: gitops/apps/nldoc/api-manifests
 
     # kimi manifests (vendored from cluster) - remove GitLab dependency
     - repoURL: https://github.com/ConductionNL/NL_doc.git

@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: editor-app
+  namespace: nldoc
+spec:
+  selector:
+    app: editor-app
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: editor-app
+  namespace: nldoc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: editor-app
+  template:
+    metadata:
+      labels:
+        app: editor-app
+    spec:
+      containers:
+        - name: editor
+          image: registry.gitlab.com/logius/nldoc/web/editor:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: API_URL
+              value: https://api.nldoc.commonground.nu
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: editor-app
+  namespace: nldoc
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/auth-type: "basic"
+    nginx.ingress.kubernetes.io/auth-secret: "nldoc-basic-auth"
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - editor.nldoc.commonground.nu
+      secretName: editor-tls
+  rules:
+    - host: editor.nldoc.commonground.nu
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: editor-app
+                port:
+                  number: 80
+
+
