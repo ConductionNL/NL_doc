@@ -150,8 +150,8 @@ items:
           fsGroupChangePolicy: Always
         containers:
         - name: worker
-          image: registry.gitlab.com/logius/nldoc/worker/document-mimetype-from-header:3.1.1
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/conductionnl/nldoc-worker-document-mimetype-from-header:latest
+          imagePullPolicy: Always
           env:
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
@@ -230,8 +230,8 @@ items:
           fsGroupChangePolicy: Always
         containers:
         - name: worker
-          image: registry.gitlab.com/logius/nldoc/worker/pdf-nldocspec:4.1.0
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/conductionnl/nldoc-worker-pdf-nldocspec:latest
+          imagePullPolicy: Always
           env:
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
