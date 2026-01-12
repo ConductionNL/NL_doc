@@ -76,9 +76,9 @@ items:
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
-            value: disable
+            value: require
           - name: PGSSLMODE
-            value: disable
+            value: require
           - name: POSTGRES_POOL_SIZE
             value: "20"
           - name: POSTGRESQL_USERNAME
@@ -189,9 +189,9 @@ items:
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
-            value: disable
+            value: require
           - name: PGSSLMODE
-            value: disable
+            value: require
           - name: POSTGRES_POOL_SIZE
             value: "20"
           resources:
@@ -290,9 +290,9 @@ items:
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
-            value: disable
+            value: require
           - name: PGSSLMODE
-            value: disable
+            value: require
           - name: POSTGRES_POOL_SIZE
             value: "20"
           - name: POSTGRESQL_USERNAME
