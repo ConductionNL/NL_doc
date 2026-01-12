@@ -31,23 +31,15 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clone upstream document-source worker
-        if: ${{ secrets.GITLAB_READ_TOKEN == '' }}
+      - name: Prepare build context
         run: |
-          echo "Cloning without credentials..."
-          git clone --depth 1 https://gitlab.com/logius/nldoc/worker/document-source.git worker-document-source-src
-
-      - name: Clone upstream document-source worker (auth)
-        if: ${{ secrets.GITLAB_READ_TOKEN != '' }}
-        run: |
-          echo "Cloning with GitLab token..."
-          git clone --depth 1 https://oauth2:${{ secrets.GITLAB_READ_TOKEN }}@gitlab.com/logius/nldoc/worker/document-source.git worker-document-source-src
+          echo "Using local shim worker as build context"
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: worker-document-source-src
-          file: worker-document-source-src/Dockerfile
+          context: workers/document-source-shim
+          file: workers/document-source-shim/Dockerfile
           push: true
           tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-worker-document-source:latest
           provenance: false
