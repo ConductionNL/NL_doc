@@ -13,13 +13,13 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      OWNER_LC: ${{ github.repository_owner || 'ConductionNL' }}
-      OWNER_LC_SAFE: ${{ github.repository_owner && toLower(github.repository_owner) || 'conductionnl' }}
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner && toLower(github.repository_owner) || 'conductionnl' }}/nldoc-worker-document-source:latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Compute owner lowercase
+        shell: bash
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,7 +41,7 @@ jobs:
           context: worker-document-source-src
           file: worker-document-source-src/Dockerfile
           push: true
-          tags: ${{ env.IMAGE_NAME }}
+          tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-worker-document-source:latest
           provenance: false
           sbom: false
 
