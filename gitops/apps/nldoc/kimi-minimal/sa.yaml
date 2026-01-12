@@ -29,6 +29,11 @@ items:
 - apiVersion: v1
   kind: ServiceAccount
   metadata:
+    name: kimi-station--folio-spec
+    namespace: nldoc
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
     name: kimi-worker--pdf-page
     namespace: nldoc
 -
