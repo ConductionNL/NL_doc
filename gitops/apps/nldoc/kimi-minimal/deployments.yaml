@@ -34,6 +34,8 @@ items:
           image: registry.gitlab.com/logius/nldoc/worker/stations:13.0.1
           imagePullPolicy: IfNotPresent
           env:
+          - name: NODE_TLS_REJECT_UNAUTHORIZED
+            value: "0"
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
           - name: AMQP_PROTOCOL
@@ -74,7 +76,9 @@ items:
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
-            value: verify-full
+            value: disable
+          - name: PGSSLMODE
+            value: disable
           - name: POSTGRES_POOL_SIZE
             value: "20"
           - name: POSTGRESQL_USERNAME
@@ -141,6 +145,8 @@ items:
           image: registry.gitlab.com/logius/nldoc/worker/stations:13.0.1
           imagePullPolicy: IfNotPresent
           env:
+          - name: NODE_TLS_REJECT_UNAUTHORIZED
+            value: "0"
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
           - name: AMQP_PROTOCOL
@@ -183,7 +189,9 @@ items:
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
-            value: verify-full
+            value: disable
+          - name: PGSSLMODE
+            value: disable
           - name: POSTGRES_POOL_SIZE
             value: "20"
           resources:
@@ -240,6 +248,8 @@ items:
           image: registry.gitlab.com/logius/nldoc/worker/stations:13.0.1
           imagePullPolicy: IfNotPresent
           env:
+          - name: NODE_TLS_REJECT_UNAUTHORIZED
+            value: "0"
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
           - name: AMQP_PROTOCOL
@@ -280,7 +290,9 @@ items:
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
-            value: verify-full
+            value: disable
+          - name: PGSSLMODE
+            value: disable
           - name: POSTGRES_POOL_SIZE
             value: "20"
           - name: POSTGRESQL_USERNAME
