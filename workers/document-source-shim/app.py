@@ -28,7 +28,8 @@ def main() -> None:
     amqp_url = build_amqp_url()
     exchange = "nldoc.topics"
     consume_routing_key = "worker.document-source.jobs"
-    publish_routing_key = "worker.pdf-pdfmetadata.jobs"
+    # Simulate worker result expected by station: publish a result for document-source
+    publish_routing_key = "worker.document-source.results.0"
     queue_name = "worker-document-source"
 
     print(f"[shim] Connecting to {amqp_url}", flush=True)
@@ -39,11 +40,15 @@ def main() -> None:
             with pika.BlockingConnection(params) as connection:
                 channel = connection.channel()
                 # Declare topic exchange (idempotent if same type)
-                channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
+                channel.exchange_declare(
+                    exchange=exchange, exchange_type="topic", durable=True
+                )
 
                 # Declare and bind queue for document-source jobs
                 channel.queue_declare(queue=queue_name, durable=True)
-                channel.queue_bind(queue=queue_name, exchange=exchange, routing_key=consume_routing_key)
+                channel.queue_bind(
+                    queue=queue_name, exchange=exchange, routing_key=consume_routing_key
+                )
 
                 channel.basic_qos(prefetch_count=1)
 
@@ -51,19 +56,35 @@ def main() -> None:
                     try:
                         payload = json.loads(body.decode("utf-8"))
                     except Exception as e:
-                        print(f"[shim] Invalid JSON body: {e}", file=sys.stderr, flush=True)
+                        print(
+                            f"[shim] Invalid JSON body: {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         return
 
                     # Expect either full envelope with 'workerJob' or direct job body
-                    if isinstance(payload, dict) and "workerJob" in payload and isinstance(payload["workerJob"], dict):
+                    if (
+                        isinstance(payload, dict)
+                        and "workerJob" in payload
+                        and isinstance(payload["workerJob"], dict)
+                    ):
                         job = payload["workerJob"]
                     else:
                         job = payload
 
                     # Minimal validation: require bucketName and filename
-                    if not isinstance(job, dict) or "bucketName" not in job or "filename" not in job:
-                        print(f"[shim] Missing required fields in job: {job}", file=sys.stderr, flush=True)
+                    if (
+                        not isinstance(job, dict)
+                        or "bucketName" not in job
+                        or "filename" not in job
+                    ):
+                        print(
+                            f"[shim] Missing required fields in job: {job}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         return
 
@@ -72,20 +93,30 @@ def main() -> None:
                         exchange=exchange,
                         routing_key=publish_routing_key,
                         body=out_body,
-                        properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+                        properties=pika.BasicProperties(
+                            content_type="application/json", delivery_mode=2
+                        ),
                     )
-                    print(f"[shim] Republished job to {publish_routing_key}: {job.get('filename')}", flush=True)
+                    print(
+                        f"[shim] Republished job to {publish_routing_key}: {job.get('filename')}",
+                        flush=True,
+                    )
                     ch.basic_ack(delivery_tag=method.delivery_tag)
 
                 channel.basic_consume(queue=queue_name, on_message_callback=handle)
-                print(f"[shim] Consuming {consume_routing_key} → publishing {publish_routing_key}", flush=True)
+                print(
+                    f"[shim] Consuming {consume_routing_key} → publishing {publish_routing_key}",
+                    flush=True,
+                )
                 channel.start_consuming()
         except Exception as e:
-            print(f"[shim] Connection error: {e}. Retrying in 5s...", file=sys.stderr, flush=True)
+            print(
+                f"[shim] Connection error: {e}. Retrying in 5s...",
+                file=sys.stderr,
+                flush=True,
+            )
             time.sleep(5)
 
 
 if __name__ == "__main__":
     main()
-
-

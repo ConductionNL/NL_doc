@@ -151,7 +151,7 @@ items:
         containers:
         - name: worker
           image: ghcr.io/conductionnl/nldoc-worker-document-source:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
