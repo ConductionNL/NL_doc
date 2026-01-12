@@ -72,7 +72,15 @@ items:
           - name: POSTGRES_DB
             value: nldoc
           - name: POSTGRES_USER
-            value: station
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
@@ -183,9 +191,15 @@ items:
           - name: POSTGRES_DB
             value: nldoc
           - name: POSTGRES_USER
-            value: nldoc
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
           - name: POSTGRES_PASSWORD
-            value: changeme
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
@@ -286,7 +300,15 @@ items:
           - name: POSTGRES_DB
             value: nldoc
           - name: POSTGRES_USER
-            value: station
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: username
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: nldoc.nldoc-postgres.credentials.postgresql.acid.zalan.do
+                key: password
           - name: POSTGRES_SCHEMA
             value: public
           - name: POSTGRES_SSL
