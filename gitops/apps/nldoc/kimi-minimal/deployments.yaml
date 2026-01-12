@@ -635,7 +635,7 @@ items:
                 key: password
           - name: STATION_CONFIGURATION
             value: |
-              {"input":{"type":"page"},"output":{"attribute":{"name":"pageImage","type":"file"},"type":"attribute"},"workerResult":"fileWorkerResult"}
+              {"input":{"parentType":"folio","type":"page"},"output":{"attribute":{"name":"pageImage","type":"file"},"type":"attribute"},"workerResult":"fileWorkerResult"}
           - name: POSTGRES_HOST
             value: nldoc-postgres.nldoc.svc.cluster.local
           - name: POSTGRES_PORT
@@ -744,7 +744,7 @@ items:
                 key: password
           - name: STATION_CONFIGURATION
             value: |
-              {"input":{"type":"page"},"output":{"attribute":{"name":"regions","type":"array"},"type":"attribute"},"workerResult":"fileWorkerResult"}
+              {"input":{"parentType":"folio","type":"page"},"output":{"attribute":{"name":"regions","type":"array"},"type":"attribute"},"workerResult":"fileWorkerResult"}
           - name: POSTGRES_HOST
             value: nldoc-postgres.nldoc.svc.cluster.local
           - name: POSTGRES_PORT
@@ -995,11 +995,11 @@ items:
                 key: password
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 300m
+              memory: 1Gi
             limits:
-              cpu: 150m
-              memory: 192Mi
+              cpu: "1"
+              memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
