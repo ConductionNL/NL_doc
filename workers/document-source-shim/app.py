@@ -31,6 +31,7 @@ def main() -> None:
     # Publish both a result for document-source and also a pdf-metadata job
     publish_result_rk = "worker.document-source.results.0"
     publish_pdfmeta_job_rk = "worker.pdf-pdfmetadata.jobs"
+    publish_spec_html_job_rk = "worker.spec-html.jobs.html-writer"
     queue_name = "worker-document-source"
 
     print(f"[shim] Connecting to {amqp_url}", flush=True)
@@ -93,7 +94,11 @@ def main() -> None:
                     attrs = job.get("attributes") or {}
                     if "mimeType" not in attrs:
                         fn = str(job.get("filename", "")).lower()
-                        attrs["mimeType"] = "application/pdf" if fn.endswith(".pdf") else "application/octet-stream"
+                        attrs["mimeType"] = (
+                            "application/pdf"
+                            if fn.endswith(".pdf")
+                            else "application/octet-stream"
+                        )
                     job["attributes"] = attrs
 
                     out_body = json.dumps(job).encode("utf-8")
@@ -122,11 +127,24 @@ def main() -> None:
                         f"[shim] Published job {publish_pdfmeta_job_rk}: {job.get('filename')}",
                         flush=True,
                     )
+                    # And attempt html writer directly for PoC
+                    channel.basic_publish(
+                        exchange=exchange,
+                        routing_key=publish_spec_html_job_rk,
+                        body=out_body,
+                        properties=pika.BasicProperties(
+                            content_type="application/json", delivery_mode=2
+                        ),
+                    )
+                    print(
+                        f"[shim] Published job {publish_spec_html_job_rk}: {job.get('filename')}",
+                        flush=True,
+                    )
                     ch.basic_ack(delivery_tag=method.delivery_tag)
 
                 channel.basic_consume(queue=queue_name, on_message_callback=handle)
                 print(
-                    f"[shim] Consuming {consume_routing_key} → publishing {publish_result_rk} and {publish_pdfmeta_job_rk}",
+                    f"[shim] Consuming {consume_routing_key} → publishing {publish_result_rk}, {publish_pdfmeta_job_rk} and {publish_spec_html_job_rk}",
                     flush=True,
                 )
                 channel.start_consuming()
