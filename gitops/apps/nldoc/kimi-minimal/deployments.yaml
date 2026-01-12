@@ -951,16 +951,6 @@ items:
             value: require
           - name: POSTGRES_POOL_SIZE
             value: "20"
-          - name: S3_ACCESS_KEY_ID
-            valueFrom:
-              secretKeyRef:
-                name: minio-credentials
-                key: accesskey
-          - name: S3_SECRET_ACCESS_KEY
-            valueFrom:
-              secretKeyRef:
-                name: minio-credentials
-                key: secretkey
           - name: S3_HOST
             value: minio.nldoc.svc.cluster.local
           - name: S3_PORT
@@ -1092,16 +1082,6 @@ items:
             value: require
           - name: POSTGRES_POOL_SIZE
             value: "20"
-          - name: S3_ACCESS_KEY_ID
-            valueFrom:
-              secretKeyRef:
-                name: minio-credentials
-                key: accesskey
-          - name: S3_SECRET_ACCESS_KEY
-            valueFrom:
-              secretKeyRef:
-                name: minio-credentials
-                key: secretkey
           - name: S3_HOST
             value: minio.nldoc.svc.cluster.local
           - name: S3_PORT
