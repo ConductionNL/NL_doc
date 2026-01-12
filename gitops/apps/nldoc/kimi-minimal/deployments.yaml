@@ -150,7 +150,7 @@ items:
           fsGroupChangePolicy: Always
         containers:
         - name: worker
-          image: registry.gitlab.com/logius/nldoc/worker/document-source:latest
+          image: ghcr.io/conductionnl/nldoc-worker-document-source:latest
           imagePullPolicy: IfNotPresent
           env:
           - name: AMQP_HOST
