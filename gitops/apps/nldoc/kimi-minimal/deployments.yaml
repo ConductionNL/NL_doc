@@ -744,7 +744,7 @@ items:
                 key: password
           - name: STATION_CONFIGURATION
             value: |
-              {"input":{"parentType":"page","type":"image"},"output":{"attribute":{"name":"regions","type":"array"},"type":"attribute"},"workerResult":"fileWorkerResult"}
+              {"input":{"type":"page"},"output":{"attribute":{"name":"regions","type":"array"},"type":"attribute"},"workerResult":"fileWorkerResult"}
           - name: POSTGRES_HOST
             value: nldoc-postgres.nldoc.svc.cluster.local
           - name: POSTGRES_PORT
