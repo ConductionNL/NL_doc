@@ -32,8 +32,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clone upstream document-source worker
+        if: ${{ secrets.GITLAB_READ_TOKEN == '' }}
         run: |
+          echo "Cloning without credentials..."
           git clone --depth 1 https://gitlab.com/logius/nldoc/worker/document-source.git worker-document-source-src
+
+      - name: Clone upstream document-source worker (auth)
+        if: ${{ secrets.GITLAB_READ_TOKEN != '' }}
+        run: |
+          echo "Cloning with GitLab token..."
+          git clone --depth 1 https://oauth2:${{ secrets.GITLAB_READ_TOKEN }}@gitlab.com/logius/nldoc/worker/document-source.git worker-document-source-src
 
       - name: Build and push
         uses: docker/build-push-action@v6
