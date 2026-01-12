@@ -21,6 +21,42 @@ items:
   metadata:
     name: kimi-worker--pdf-page
     namespace: nldoc
+-
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-station--page-image
+    namespace: nldoc
+-
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-station--page-regions
+    namespace: nldoc
+-
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-worker--page-content-images
+    namespace: nldoc
+-
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-worker--page-regions-yolo
+    namespace: nldoc
+-
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-worker--page-regions-image-processing
+    namespace: nldoc
+-
+  apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: kimi-worker--page-interpreted-content-ocr
+    namespace: nldoc
 - apiVersion: v1
   kind: ServiceAccount
   metadata:
