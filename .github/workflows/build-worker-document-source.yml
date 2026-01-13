@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - ".github/workflows/build-worker-document-source.yml"
+      - "workers/document-source-shim/**"
 
 jobs:
   build-and-push:
@@ -44,5 +45,6 @@ jobs:
           tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-worker-document-source:latest
           provenance: false
           sbom: false
+          no-cache: true
 
 
