@@ -1,8 +1,16 @@
 import json
 import os
+import socket
 import sys
 import time
+import uuid
+from datetime import datetime, timezone
+
 import pika
+
+
+INSTANCE_NAME = f"shim-document-source-{socket.gethostname()}"
+WORKER_NAME = "worker-document-source"
 
 
 def get_env(name: str, default: str | None = None) -> str:
@@ -102,16 +110,29 @@ def main() -> None:
                     job["attributes"] = attrs
 
                     out_body = json.dumps(job).encode("utf-8")
+
+                    # Build the headers the station expects
+                    trace_id = str(uuid.uuid4())
+                    ts = datetime.now(timezone.utc).isoformat()
+                    headers = {
+                        "x-kimi-worker-instance-name": INSTANCE_NAME,
+                        "x-kimi-worker-name": WORKER_NAME,
+                        "x-trace-id": trace_id,
+                        "timestamp": ts,
+                    }
+
                     channel.basic_publish(
                         exchange=exchange,
                         routing_key=publish_result_rk,
                         body=out_body,
                         properties=pika.BasicProperties(
-                            content_type="application/json", delivery_mode=2
+                            content_type="application/json",
+                            delivery_mode=2,
+                            headers=headers,
                         ),
                     )
                     print(
-                        f"[shim] Published result {publish_result_rk}: {job.get('filename')}",
+                        f"[shim] Published result {publish_result_rk}: {job.get('filename')} (trace={trace_id})",
                         flush=True,
                     )
                     # Also kick pdf-metadata worker
@@ -120,7 +141,9 @@ def main() -> None:
                         routing_key=publish_pdfmeta_job_rk,
                         body=out_body,
                         properties=pika.BasicProperties(
-                            content_type="application/json", delivery_mode=2
+                            content_type="application/json",
+                            delivery_mode=2,
+                            headers=headers,
                         ),
                     )
                     print(
@@ -133,7 +156,9 @@ def main() -> None:
                         routing_key=publish_spec_html_job_rk,
                         body=out_body,
                         properties=pika.BasicProperties(
-                            content_type="application/json", delivery_mode=2
+                            content_type="application/json",
+                            delivery_mode=2,
+                            headers=headers,
                         ),
                     )
                     print(
