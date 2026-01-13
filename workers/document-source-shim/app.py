@@ -11,6 +11,7 @@ import pika
 
 INSTANCE_NAME = f"shim-document-source-{socket.gethostname()}"
 WORKER_NAME = "worker-document-source"
+WORKER_TYPE = "document-source"  # For routing keys: worker.<type>.acks
 HEARTBEAT_INTERVAL = 60  # seconds
 
 
@@ -43,17 +44,19 @@ def make_headers(trace_id: str | None = None) -> dict:
 
 def send_worker_signal(channel, exchange: str, signal_type: str):
     """Send worker started/heartbeat signal to register with the station."""
-    routing_key = f"{WORKER_NAME}.acks"
+    routing_key = f"worker.{WORKER_TYPE}.acks"
     trace_id = str(uuid.uuid4())
     headers = make_headers(trace_id)
-    
+
     # The station expects a specific format for worker signals
-    body = json.dumps({
-        "workerName": WORKER_NAME,
-        "workerInstance": INSTANCE_NAME,
-        "signal": signal_type,  # "started" or "heartbeat"
-    }).encode("utf-8")
-    
+    body = json.dumps(
+        {
+            "workerName": WORKER_NAME,
+            "workerInstance": INSTANCE_NAME,
+            "signal": signal_type,  # "started" or "heartbeat"
+        }
+    ).encode("utf-8")
+
     channel.basic_publish(
         exchange=exchange,
         routing_key=routing_key,
@@ -69,17 +72,19 @@ def send_worker_signal(channel, exchange: str, signal_type: str):
 
 def send_job_ack(channel, exchange: str, job: dict, job_id: str, trace_id: str):
     """Send job acknowledgment to the station."""
-    routing_key = f"{WORKER_NAME}.acks"
+    routing_key = f"worker.{WORKER_TYPE}.acks"
     headers = make_headers(trace_id)
-    
+
     record_id = job.get("recordId", f"document|||{job.get('filename', 'unknown')}")
-    body = json.dumps({
-        "workerName": WORKER_NAME,
-        "workerInstance": INSTANCE_NAME,
-        "jobId": job_id,
-        "recordId": record_id,
-    }).encode("utf-8")
-    
+    body = json.dumps(
+        {
+            "workerName": WORKER_NAME,
+            "workerInstance": INSTANCE_NAME,
+            "jobId": job_id,
+            "recordId": record_id,
+        }
+    ).encode("utf-8")
+
     channel.basic_publish(
         exchange=exchange,
         routing_key=routing_key,
@@ -96,18 +101,24 @@ def send_job_ack(channel, exchange: str, job: dict, job_id: str, trace_id: str):
 def heartbeat_thread(amqp_url: str, exchange: str):
     """Background thread that sends periodic heartbeats."""
     params = pika.URLParameters(amqp_url)
-    
+
     while True:
         try:
             with pika.BlockingConnection(params) as conn:
                 ch = conn.channel()
-                ch.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
-                
+                ch.exchange_declare(
+                    exchange=exchange, exchange_type="topic", durable=True
+                )
+
                 while True:
                     send_worker_signal(ch, exchange, "heartbeat")
                     time.sleep(HEARTBEAT_INTERVAL)
         except Exception as e:
-            print(f"[shim/heartbeat] Error: {e}. Retrying in 10s...", file=sys.stderr, flush=True)
+            print(
+                f"[shim/heartbeat] Error: {e}. Retrying in 10s...",
+                file=sys.stderr,
+                flush=True,
+            )
             time.sleep(10)
 
 
@@ -123,16 +134,22 @@ def main() -> None:
     params = pika.URLParameters(amqp_url)
 
     # Start heartbeat thread
-    hb_thread = threading.Thread(target=heartbeat_thread, args=(amqp_url, exchange), daemon=True)
+    hb_thread = threading.Thread(
+        target=heartbeat_thread, args=(amqp_url, exchange), daemon=True
+    )
     hb_thread.start()
 
     while True:
         try:
             with pika.BlockingConnection(params) as connection:
                 channel = connection.channel()
-                channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
+                channel.exchange_declare(
+                    exchange=exchange, exchange_type="topic", durable=True
+                )
                 channel.queue_declare(queue=queue_name, durable=True)
-                channel.queue_bind(queue=queue_name, exchange=exchange, routing_key=consume_routing_key)
+                channel.queue_bind(
+                    queue=queue_name, exchange=exchange, routing_key=consume_routing_key
+                )
                 channel.basic_qos(prefetch_count=1)
 
                 # Send "Worker started" signal to register with the station
@@ -152,8 +169,16 @@ def main() -> None:
                     else:
                         job = payload
 
-                    if not isinstance(job, dict) or "bucketName" not in job or "filename" not in job:
-                        print(f"[shim] Missing fields in job: {job}", file=sys.stderr, flush=True)
+                    if (
+                        not isinstance(job, dict)
+                        or "bucketName" not in job
+                        or "filename" not in job
+                    ):
+                        print(
+                            f"[shim] Missing fields in job: {job}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         return
 
@@ -169,7 +194,11 @@ def main() -> None:
                     attrs = job.get("attributes") or {}
                     if "mimeType" not in attrs:
                         fn = str(job.get("filename", "")).lower()
-                        attrs["mimeType"] = "application/pdf" if fn.endswith(".pdf") else "application/octet-stream"
+                        attrs["mimeType"] = (
+                            "application/pdf"
+                            if fn.endswith(".pdf")
+                            else "application/octet-stream"
+                        )
                     job["attributes"] = attrs
 
                     # Build result with proper structure
@@ -189,7 +218,7 @@ def main() -> None:
                     result_body = json.dumps(result).encode("utf-8")
 
                     headers = make_headers(trace_id)
-                    
+
                     # Publish result to station
                     # Use job-specific routing key: worker.document-source.results.<jobId>
                     result_rk = f"worker.document-source.results.{job_id}"
@@ -203,7 +232,10 @@ def main() -> None:
                             headers=headers,
                         ),
                     )
-                    print(f"[shim] Published result to {result_rk} (trace={trace_id})", flush=True)
+                    print(
+                        f"[shim] Published result to {result_rk} (trace={trace_id})",
+                        flush=True,
+                    )
 
                     ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -212,7 +244,11 @@ def main() -> None:
                 channel.start_consuming()
 
         except Exception as e:
-            print(f"[shim] Connection error: {e}. Retrying in 5s...", file=sys.stderr, flush=True)
+            print(
+                f"[shim] Connection error: {e}. Retrying in 5s...",
+                file=sys.stderr,
+                flush=True,
+            )
             time.sleep(5)
 
 
