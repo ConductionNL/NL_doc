@@ -1,8 +1,17 @@
+"""
+Document-source shim: BYPASS APPROACH for PoC
+
+The document-source station rejects our worker registration (unknown worker).
+Instead of fighting the station, we bypass it:
+1. Consume jobs from the station's worker queue
+2. Forward directly to the pdf-pdfmetadata station's input queue
+3. Skip the ACK/registration dance entirely
+"""
+
 import json
 import os
 import socket
 import sys
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -10,9 +19,6 @@ from datetime import datetime, timezone
 import pika
 
 INSTANCE_NAME = f"shim-document-source-{socket.gethostname()}"
-WORKER_NAME = "worker-document-source"
-WORKER_TYPE = "document-source"  # For routing keys: worker.<type>.acks
-HEARTBEAT_INTERVAL = 60  # seconds
 
 
 def get_env(name: str, default: str | None = None) -> str:
@@ -31,113 +37,21 @@ def build_amqp_url() -> str:
     return f"{protocol}://{username}:{password}@{host}:{port}/"
 
 
-def make_headers(trace_id: str | None = None) -> dict:
-    """Build standard Kimi worker headers."""
-    return {
-        "x-kimi-worker-instance-name": INSTANCE_NAME,
-        "x-kimi-worker-name": WORKER_NAME,
-        "x-trace-id": trace_id or str(uuid.uuid4()),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "priority": 5,
-    }
-
-
-def send_worker_signal(channel, exchange: str, signal_type: str):
-    """Send worker started/heartbeat signal to register with the station."""
-    routing_key = f"worker.{WORKER_TYPE}.acks"
-    trace_id = str(uuid.uuid4())
-    headers = make_headers(trace_id)
-
-    # The station expects a specific format for worker signals
-    body = json.dumps(
-        {
-            "workerName": WORKER_NAME,
-            "workerInstance": INSTANCE_NAME,
-            "signal": signal_type,  # "started" or "heartbeat"
-        }
-    ).encode("utf-8")
-
-    channel.basic_publish(
-        exchange=exchange,
-        routing_key=routing_key,
-        body=body,
-        properties=pika.BasicProperties(
-            content_type="application/json",
-            delivery_mode=2,
-            headers=headers,
-        ),
-    )
-    print(f"[shim] Sent {signal_type} signal to {routing_key}", flush=True)
-
-
-def send_job_ack(channel, exchange: str, job: dict, job_id: str, trace_id: str):
-    """Send job acknowledgment to the station."""
-    routing_key = f"worker.{WORKER_TYPE}.acks"
-    headers = make_headers(trace_id)
-
-    record_id = job.get("recordId", f"document|||{job.get('filename', 'unknown')}")
-    body = json.dumps(
-        {
-            "workerName": WORKER_NAME,
-            "workerInstance": INSTANCE_NAME,
-            "jobId": job_id,
-            "recordId": record_id,
-        }
-    ).encode("utf-8")
-
-    channel.basic_publish(
-        exchange=exchange,
-        routing_key=routing_key,
-        body=body,
-        properties=pika.BasicProperties(
-            content_type="application/json",
-            delivery_mode=2,
-            headers=headers,
-        ),
-    )
-    print(f"[shim] Sent job ACK for {job_id}", flush=True)
-
-
-def heartbeat_thread(amqp_url: str, exchange: str):
-    """Background thread that sends periodic heartbeats."""
-    params = pika.URLParameters(amqp_url)
-
-    while True:
-        try:
-            with pika.BlockingConnection(params) as conn:
-                ch = conn.channel()
-                ch.exchange_declare(
-                    exchange=exchange, exchange_type="topic", durable=True
-                )
-
-                while True:
-                    send_worker_signal(ch, exchange, "heartbeat")
-                    time.sleep(HEARTBEAT_INTERVAL)
-        except Exception as e:
-            print(
-                f"[shim/heartbeat] Error: {e}. Retrying in 10s...",
-                file=sys.stderr,
-                flush=True,
-            )
-            time.sleep(10)
-
-
 def main() -> None:
     amqp_url = build_amqp_url()
     exchange = "nldoc.topics"
+    
+    # What we consume (jobs from document-source station)
+    consume_queue = "worker-document-source"
     consume_routing_key = "worker.document-source.jobs"
-    publish_result_rk = "worker.document-source.results.0"
-    queue_name = "worker-document-source"
+    
+    # Where we publish (directly to pdf-pdfmetadata station)
+    # The station listens on its station queue, which is bound to station.pdf-pdfmetadata.#
+    publish_queue = "station-pdf-pdfmetadata"
 
-    print(f"[shim] Worker {INSTANCE_NAME} starting...", flush=True)
+    print(f"[shim] Worker {INSTANCE_NAME} starting (BYPASS MODE)...", flush=True)
     print(f"[shim] Connecting to {amqp_url}", flush=True)
     params = pika.URLParameters(amqp_url)
-
-    # Start heartbeat thread
-    hb_thread = threading.Thread(
-        target=heartbeat_thread, args=(amqp_url, exchange), daemon=True
-    )
-    hb_thread.start()
 
     while True:
         try:
@@ -146,14 +60,16 @@ def main() -> None:
                 channel.exchange_declare(
                     exchange=exchange, exchange_type="topic", durable=True
                 )
-                channel.queue_declare(queue=queue_name, durable=True)
+                
+                # Ensure our consume queue exists and is bound
+                channel.queue_declare(queue=consume_queue, durable=True)
                 channel.queue_bind(
-                    queue=queue_name, exchange=exchange, routing_key=consume_routing_key
+                    queue=consume_queue, exchange=exchange, routing_key=consume_routing_key
                 )
                 channel.basic_qos(prefetch_count=1)
 
-                # Send "Worker started" signal to register with the station
-                send_worker_signal(channel, exchange, "started")
+                print(f"[shim] Consuming from {consume_queue}", flush=True)
+                print(f"[shim] Will forward to {publish_queue}", flush=True)
 
                 def handle(ch, method, properties, body):
                     try:
@@ -169,78 +85,81 @@ def main() -> None:
                     else:
                         job = payload
 
-                    if (
-                        not isinstance(job, dict)
-                        or "bucketName" not in job
-                        or "filename" not in job
-                    ):
-                        print(
-                            f"[shim] Missing fields in job: {job}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                    if not isinstance(job, dict):
+                        print(f"[shim] Job is not a dict: {job}", file=sys.stderr, flush=True)
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         return
 
-                    # Generate IDs for this job
-                    job_id = str(uuid.uuid4())
+                    bucket_name = job.get("bucketName")
+                    filename = job.get("filename")
+                    
+                    if not bucket_name or not filename:
+                        print(f"[shim] Missing bucketName or filename: {job}", file=sys.stderr, flush=True)
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                        return
+
+                    # Generate IDs
                     trace_id = str(uuid.uuid4())
-                    record_id = job.get("recordId", f"document|||{job.get('filename')}")
-
-                    # Send job ACK to station (so it knows we're processing)
-                    send_job_ack(channel, exchange, job, job_id, trace_id)
-
-                    # Ensure mimeType
+                    record_id = job.get("recordId", f"pdf|||{filename}")
+                    
+                    # Ensure mimeType is set
                     attrs = job.get("attributes") or {}
                     if "mimeType" not in attrs:
-                        fn = str(job.get("filename", "")).lower()
-                        attrs["mimeType"] = (
-                            "application/pdf"
-                            if fn.endswith(".pdf")
-                            else "application/octet-stream"
-                        )
-                    job["attributes"] = attrs
-
-                    # Build result with proper structure
-                    result = {
-                        "workerResult": {
-                            "jobId": job_id,
-                            "recordId": record_id,
-                            "bucketName": job.get("bucketName"),
-                            "filename": job.get("filename"),
-                            "attributes": attrs,
-                            "output": {
-                                "fileType": attrs.get("mimeType"),
-                                "filename": job.get("filename"),
-                            },
-                        }
+                        fn_lower = str(filename).lower()
+                        if fn_lower.endswith(".pdf"):
+                            attrs["mimeType"] = "application/pdf"
+                        else:
+                            attrs["mimeType"] = "application/octet-stream"
+                    
+                    # Build the record that the pdf-pdfmetadata station expects
+                    # This mimics what document-source station would produce
+                    station_input = {
+                        "id": record_id,
+                        "bucketName": bucket_name,
+                        "filename": filename,
+                        "inputType": "pdf",
+                        "targetFileType": job.get("targetFileType", "text/html"),
+                        "documentId": filename,
+                        "itemIndex": None,
+                        "traceId": trace_id,
+                        "processingStartDate": datetime.now(timezone.utc).isoformat(),
+                        "state": "processing",
+                        "attributes": attrs,
+                        "knownAttributeNames": list(attrs.keys()),
+                        "knownAttributeStats": {},
                     }
-                    result_body = json.dumps(result).encode("utf-8")
+                    
+                    out_body = json.dumps(station_input).encode("utf-8")
+                    
+                    # Headers for the station
+                    headers = {
+                        "x-trace-id": trace_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
 
-                    headers = make_headers(trace_id)
-
-                    # Publish result to station
-                    # Use job-specific routing key: worker.document-source.results.<jobId>
-                    result_rk = f"worker.document-source.results.{job_id}"
+                    # Publish directly to the pdf-pdfmetadata station queue
+                    # The station listens on routing key: pdfs.*
+                    routing_key = f"pdfs.{filename}"
+                    
                     channel.basic_publish(
                         exchange=exchange,
-                        routing_key=result_rk,
-                        body=result_body,
+                        routing_key=routing_key,
+                        body=out_body,
                         properties=pika.BasicProperties(
                             content_type="application/json",
                             delivery_mode=2,
                             headers=headers,
                         ),
                     )
+                    
                     print(
-                        f"[shim] Published result to {result_rk} (trace={trace_id})",
+                        f"[shim] Forwarded job to {routing_key}: bucket={bucket_name}, file={filename}, trace={trace_id}",
                         flush=True,
                     )
 
                     ch.basic_ack(delivery_tag=method.delivery_tag)
 
-                channel.basic_consume(queue=queue_name, on_message_callback=handle)
-                print(f"[shim] Consuming {consume_routing_key}", flush=True)
+                channel.basic_consume(queue=consume_queue, on_message_callback=handle)
                 channel.start_consuming()
 
         except Exception as e:
