@@ -113,6 +113,7 @@ def main() -> None:
                     
                     # Build the record that the pdf-pdfmetadata station expects
                     # This mimics what document-source station would produce
+                    now = datetime.now(timezone.utc).isoformat()
                     station_input = {
                         "id": record_id,
                         "bucketName": bucket_name,
@@ -122,11 +123,15 @@ def main() -> None:
                         "documentId": filename,
                         "itemIndex": None,
                         "traceId": trace_id,
-                        "processingStartDate": datetime.now(timezone.utc).isoformat(),
+                        "processingStartDate": now,
                         "state": "processing",
                         "attributes": attrs,
                         "knownAttributeNames": list(attrs.keys()),
                         "knownAttributeStats": {},
+                        # Required fields for pdf-pdfmetadata station
+                        "kimiRegistrationDate": now,
+                        "creationDate": now,
+                        "processCount": 0,
                     }
                     
                     out_body = json.dumps(station_input).encode("utf-8")
