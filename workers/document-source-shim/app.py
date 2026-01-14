@@ -114,13 +114,15 @@ def main() -> None:
                     # Build the record that the pdf-pdfmetadata station expects
                     # This mimics what document-source station would produce
                     now = datetime.now(timezone.utc).isoformat()
+                    # Use documentId if provided, otherwise fall back to filename
+                    document_id = job.get("documentId") or filename
                     station_input = {
                         "id": record_id,
                         "bucketName": bucket_name,
                         "filename": filename,
                         "inputType": "pdf",
-                        "targetFileType": job.get("targetFileType", "text/html"),
-                        "documentId": filename,
+                        "targetFileType": job.get("targetFileType", job.get("targetContentType", "text/html")),
+                        "documentId": document_id,
                         "itemIndex": None,
                         "traceId": trace_id,
                         "processingStartDate": now,
@@ -144,7 +146,8 @@ def main() -> None:
 
                     # Publish directly to the pdf-pdfmetadata station queue
                     # The station listens on routing key: pdfs.*
-                    routing_key = f"pdfs.{filename}"
+                    # Use documentId for routing (not filename)
+                    routing_key = f"pdfs.{document_id}"
                     
                     channel.basic_publish(
                         exchange=exchange,
