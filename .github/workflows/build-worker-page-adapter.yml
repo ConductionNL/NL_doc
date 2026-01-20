@@ -1,12 +1,12 @@
-name: Build document-source worker
+name: Build Page Worker Adapter
 
 on:
   workflow_dispatch: {}
   push:
     branches: [ main ]
     paths:
-      - ".github/workflows/build-worker-document-source.yml"
-      - "workers/document-source-shim/**"
+      - ".github/workflows/build-worker-page-adapter.yml"
+      - "workers/page-worker-adapter/**"
 
 jobs:
   build-and-push:
@@ -32,19 +32,13 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare build context
-        run: |
-          echo "Using local shim worker as build context"
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: workers/document-source-shim
-          file: workers/document-source-shim/Dockerfile
+          context: workers/page-worker-adapter
+          file: workers/page-worker-adapter/Dockerfile
           push: true
-          tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-worker-document-source:latest
+          tags: ghcr.io/${{ env.OWNER_LC }}/nldoc-page-worker-adapter:latest
           provenance: false
           sbom: false
           no-cache: true
-
-
