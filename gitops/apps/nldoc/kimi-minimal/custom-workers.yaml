@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kimi-worker-folio-spec-python
+  labels:
+    app.kubernetes.io/name: kimi
+    app.kubernetes.io/instance: kimi
+    app.kubernetes.io/component: worker.folio-spec-python
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: worker.folio-spec-python
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: worker.folio-spec-python
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: worker
+        image: python:3.11-slim
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "pip install -q pika minio PyMuPDF python-docx && python -u /app/app.py"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: AMQP_HOST
+          value: rabbitmq.nldoc.svc.cluster.local
+        - name: AMQP_PORT
+          value: "5672"
+        - name: AMQP_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-default-user
+              key: username
+        - name: AMQP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-default-user
+              key: password
+        - name: MINIO_ENDPOINT
+          value: minio.nldoc.svc.cluster.local:9000
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: rootUser
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: rootPassword
+        volumeMounts:
+        - name: code
+          mountPath: /app
+      volumes:
+      - name: code
+        configMap:
+          name: folio-spec-worker-code
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kimi-worker-sse-bridge
+  labels:
+    app.kubernetes.io/name: kimi
+    app.kubernetes.io/instance: kimi
+    app.kubernetes.io/component: worker.sse-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kimi
+      app.kubernetes.io/instance: kimi
+      app.kubernetes.io/component: worker.sse-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kimi
+        app.kubernetes.io/instance: kimi
+        app.kubernetes.io/component: worker.sse-bridge
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: worker
+        image: python:3.11-slim
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "pip install -q pika && python -u /app/app.py"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: AMQP_HOST
+          value: rabbitmq.nldoc.svc.cluster.local
+        - name: AMQP_PORT
+          value: "5672"
+        - name: AMQP_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-default-user
+              key: username
+        - name: AMQP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-default-user
+              key: password
+        volumeMounts:
+        - name: code
+          mountPath: /app
+      volumes:
+      - name: code
+        configMap:
+          name: sse-bridge-code
+
+

@@ -18,6 +18,13 @@ import json
 import time
 import pika
 
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+def log(msg):
+    print(f"[sse-bridge] {msg}", flush=True)
+
 AMQP_HOST = os.environ.get("AMQP_HOST", "localhost")
 AMQP_PORT = int(os.environ.get("AMQP_PORT", "5672"))
 AMQP_USERNAME = os.environ.get("AMQP_USERNAME", os.environ.get("RABBITMQ_DEFAULT_USER", "guest"))
@@ -33,6 +40,10 @@ def extract_document_id(routing_key, payload):
     # documents.{document_id}
     if routing_key.startswith("documents."):
         return routing_key.split(".", 1)[1]
+
+    # events.{document_id} (custom event topic for SSE to avoid station-document-source parsing)
+    if routing_key.startswith("events."):
+        return routing_key.split(".", 1)[1]
     
     # Try from payload
     if isinstance(payload, dict):
@@ -47,8 +58,8 @@ def extract_document_id(routing_key, payload):
 
 
 def main():
-    print("[sse-bridge] Starting SSE Bridge Worker")
-    print(f"[sse-bridge] Connecting to {AMQP_HOST}:{AMQP_PORT}")
+    log("Starting SSE Bridge Worker")
+    log(f"Connecting to {AMQP_HOST}:{AMQP_PORT}")
     
     credentials = pika.PlainCredentials(AMQP_USERNAME, AMQP_PASSWORD)
     
@@ -79,9 +90,14 @@ def main():
                 exchange="nldoc.topics",
                 routing_key="documents.*"
             )
+            channel.queue_bind(
+                queue=queue_name,
+                exchange="nldoc.topics",
+                routing_key="events.*"
+            )
             
-            print(f"[sse-bridge] Consuming from {queue_name} (specs.* and documents.*)")
-            print("[sse-bridge] Bridging events to 'results' exchange with x-stream-filter-value header")
+            log(f"Consuming from {queue_name} (specs.* , documents.* , events.*)")
+            log("Bridging events to 'results' exchange with x-stream-filter-value header")
             
             def handle_event(ch, method, properties, body):
                 routing_key = method.routing_key
@@ -95,7 +111,7 @@ def main():
                 doc_id = extract_document_id(routing_key, payload)
                 
                 if not doc_id:
-                    print(f"[sse-bridge] Could not extract doc ID from {routing_key}")
+                    log(f"Could not extract doc ID from {routing_key}")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
                 
@@ -107,7 +123,7 @@ def main():
                 
                 # Log the bridge
                 event_type = payload.get("type", "unknown")
-                print(f"[sse-bridge] Bridging {routing_key} -> results | doc={doc_id} | type={event_type}")
+                log(f"Bridging {routing_key} -> results | doc={doc_id} | type={event_type}")
                 
                 # Republish to results exchange (which feeds the stream)
                 ch.basic_publish(
@@ -129,10 +145,12 @@ def main():
             channel.start_consuming()
             
         except pika.exceptions.AMQPConnectionError as e:
-            print(f"[sse-bridge] Connection lost: {e}, reconnecting in 5s...")
+            log(f"Connection lost: {e}, reconnecting in 5s...")
             time.sleep(5)
         except Exception as e:
-            print(f"[sse-bridge] Error: {e}, retrying in 5s...")
+            log(f"Error: {e}, retrying in 5s...")
+            import traceback
+            traceback.print_exc()
             time.sleep(5)
 
 

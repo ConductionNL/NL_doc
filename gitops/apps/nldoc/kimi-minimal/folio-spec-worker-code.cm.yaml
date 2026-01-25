@@ -1,0 +1,558 @@
+apiVersion: v1
+data:
+  app.py: "#!/usr/bin/env python3\r\n\"\"\"\r\nFolio-Spec Worker - Converts folio
+    content to NLdoc spec JSON\r\n\r\nThis worker consumes jobs from station-folio-spec
+    and generates a spec document\r\nthat can be converted to HTML/TipTap by downstream
+    workers.\r\n\r\nSupports: PDF and DOCX files\r\n\r\nFlow:\r\n  folio-spec station
+    → worker.folio-spec.jobs → THIS WORKER → specs.<docId> → station-spec-html → html-writer\r\n\"\"\"\r\n\r\nimport
+    os\r\nimport json\r\nimport uuid\r\nimport pika\r\nimport time\r\nfrom datetime
+    import datetime\r\nfrom minio import Minio\r\nfrom io import BytesIO\r\n\r\n#
+    PDF text extraction\r\nimport fitz  # PyMuPDF\r\n\r\n# DOCX text extraction\r\nfrom
+    docx import Document as DocxDocument\r\nfrom docx.shared import Pt\r\n\r\n# Configuration\r\n#
+    Build AMQP URL from separate env vars if AMQP_URL not provided\r\nAMQP_URL = os.environ.get(\"AMQP_URL\")\r\nif
+    not AMQP_URL:\r\n    AMQP_HOST = os.environ.get(\"AMQP_HOST\", \"localhost\")\r\n
+    \   AMQP_PORT = os.environ.get(\"AMQP_PORT\", \"5672\")\r\n    AMQP_USERNAME =
+    os.environ.get(\"AMQP_USERNAME\", \"guest\")\r\n    AMQP_PASSWORD = os.environ.get(\"AMQP_PASSWORD\",
+    \"guest\")\r\n    AMQP_URL = f\"amqp://{AMQP_USERNAME}:{AMQP_PASSWORD}@{AMQP_HOST}:{AMQP_PORT}/\"\r\n\r\nMINIO_ENDPOINT
+    = os.environ.get(\"MINIO_ENDPOINT\", \"minio:9000\")\r\nMINIO_USER = os.environ.get(\"MINIO_USER\",
+    os.environ.get(\"MINIO_ACCESS_KEY\", \"minio\"))\r\nMINIO_PASS = os.environ.get(\"MINIO_PASS\",
+    os.environ.get(\"MINIO_SECRET_KEY\", \"minio123\"))\r\n\r\nWORKER_NAME = \"worker-folio-spec\"\r\n#
+    IMPORTANT: workerInstance must be stable across container restarts, otherwise
+    station-folio-spec can\r\n# treat worker results as coming from an \"unknown worker\".
+    In Kubernetes, HOSTNAME == pod name.\r\nINSTANCE_NAME = (\r\n    os.environ.get(\"KIMI_WORKER_INSTANCE\")\r\n
+    \   or os.environ.get(\"HOSTNAME\")\r\n    or f\"folio-spec-worker-{uuid.uuid4().hex[:8]}\"\r\n)\r\n\r\ndef
+    get_minio():\r\n    return Minio(MINIO_ENDPOINT, access_key=MINIO_USER, secret_key=MINIO_PASS,
+    secure=False)\r\n\r\ndef extract_text_from_pdf(minio, bucket_name, filename):\r\n
+    \   \"\"\"Extract structured text from each page of a PDF file\"\"\"\r\n    print(f\"[worker]
+    Extracting text from {bucket_name}/{filename}\")\r\n    \r\n    try:\r\n        #
+    Download PDF from MinIO\r\n        response = minio.get_object(bucket_name, filename)\r\n
+    \       pdf_bytes = response.read()\r\n        response.close()\r\n        response.release_conn()\r\n
+    \       \r\n        # Open PDF with PyMuPDF\r\n        doc = fitz.open(stream=pdf_bytes,
+    filetype=\"pdf\")\r\n        \r\n        pages = []\r\n        for page_num in
+    range(len(doc)):\r\n            page = doc[page_num]\r\n            \r\n            #
+    Extract text blocks with position info for structure detection\r\n            blocks
+    = page.get_text(\"dict\", flags=fitz.TEXT_PRESERVE_WHITESPACE)[\"blocks\"]\r\n
+    \           \r\n            page_content = []\r\n            for block in blocks:\r\n
+    \               if block[\"type\"] == 0:  # Text block\r\n                    for
+    line in block.get(\"lines\", []):\r\n                        line_text = \"\"\r\n
+    \                       font_size = 0\r\n                        is_bold = False\r\n
+    \                       \r\n                        for span in line.get(\"spans\",
+    []):\r\n                            text = span.get(\"text\", \"\")\r\n                            font_size
+    = max(font_size, span.get(\"size\", 12))\r\n                            font_name
+    = span.get(\"font\", \"\").lower()\r\n                            is_bold = is_bold
+    or \"bold\" in font_name\r\n                            line_text += text\r\n
+    \                       \r\n                        line_text = line_text.strip()\r\n
+    \                       if line_text:\r\n                            # Fix encoding
+    issues (Windows-1252 artifacts in UTF-8)\r\n                            line_text
+    = fix_encoding(line_text)\r\n                            \r\n                            #
+    Detect structure based on font size and style\r\n                            if
+    font_size >= 16 or is_bold:\r\n                                page_content.append({\"type\":
+    \"heading\", \"level\": 1 if font_size >= 18 else 2, \"text\": line_text})\r\n
+    \                           else:\r\n                                page_content.append({\"type\":
+    \"paragraph\", \"text\": line_text})\r\n            \r\n            pages.append({\r\n
+    \               \"page_number\": page_num + 1,\r\n                \"content\":
+    page_content\r\n            })\r\n            print(f\"[worker] Page {page_num
+    + 1}: {len(page_content)} blocks\")\r\n        \r\n        doc.close()\r\n        return
+    pages\r\n        \r\n    except Exception as e:\r\n        print(f\"[worker] Error
+    extracting PDF text: {e}\")\r\n        import traceback\r\n        traceback.print_exc()\r\n
+    \       return None\r\n\r\ndef extract_runs_with_formatting(paragraph):\r\n    \"\"\"Extract
+    text from paragraph runs, preserving inline formatting\"\"\"\r\n    if not paragraph.runs:\r\n
+    \       return [{\"type\": \"text\", \"text\": paragraph.text}]\r\n    \r\n    result
+    = []\r\n    for run in paragraph.runs:\r\n        text = run.text\r\n        if
+    not text:\r\n            continue\r\n        \r\n        # Build text node with
+    marks for formatting\r\n        marks = []\r\n        if run.bold:\r\n            marks.append({\"type\":
+    \"bold\"})\r\n        if run.italic:\r\n            marks.append({\"type\": \"italic\"})\r\n
+    \       if run.underline:\r\n            marks.append({\"type\": \"underline\"})\r\n
+    \       \r\n        node = {\"type\": \"text\", \"text\": text}\r\n        if
+    marks:\r\n            node[\"marks\"] = marks\r\n        result.append(node)\r\n
+    \   \r\n    return result if result else [{\"type\": \"text\", \"text\": paragraph.text}]\r\n\r\ndef
+    get_list_info(paragraph):\r\n    \"\"\"Detect if paragraph is a list item and
+    get its properties\"\"\"\r\n    try:\r\n        # Check paragraph XML for list
+    properties\r\n        pPr = paragraph._element.pPr\r\n        if pPr is not None:\r\n
+    \           numPr = pPr.numPr\r\n            if numPr is not None:\r\n                ilvl
+    = numPr.ilvl\r\n                level = int(ilvl.val) if ilvl is not None else
+    0\r\n                \r\n                numId = numPr.numId\r\n                num_id
+    = int(numId.val) if numId is not None else 0\r\n                \r\n                #
+    Determine list type (bullet vs ordered)\r\n                # Numbers 1-9 are typically
+    bullets, 10+ are numbered\r\n                is_ordered = num_id >= 10 or \"number\"
+    in (paragraph.style.name.lower() if paragraph.style else \"\")\r\n                \r\n
+    \               return {\"is_list\": True, \"level\": level, \"ordered\": is_ordered,
+    \"num_id\": num_id}\r\n    except Exception:\r\n        pass\r\n    \r\n    #
+    Fallback: check style name\r\n    style_name = paragraph.style.name.lower() if
+    paragraph.style else \"\"\r\n    if \"list\" in style_name:\r\n        is_ordered
+    = \"number\" in style_name or \"ordered\" in style_name\r\n        return {\"is_list\":
+    True, \"level\": 0, \"ordered\": is_ordered, \"num_id\": 0}\r\n    \r\n    # Fallback:
+    check text prefix\r\n    text = paragraph.text.strip()\r\n    if text.startswith(('•',
+    '●', '○', '▪', '-', '*')):\r\n        return {\"is_list\": True, \"level\": 0,
+    \"ordered\": False, \"num_id\": -1}\r\n    if len(text) > 2 and text[0].isdigit()
+    and text[1] in '.):':\r\n        return {\"is_list\": True, \"level\": 0, \"ordered\":
+    True, \"num_id\": -2}\r\n    \r\n    return {\"is_list\": False}\r\n\r\ndef extract_table(table):\r\n
+    \   \"\"\"Extract table structure from DOCX table\"\"\"\r\n    rows = []\r\n    for
+    row in table.rows:\r\n        cells = []\r\n        for cell in row.cells:\r\n
+    \           # Get cell text (join all paragraphs)\r\n            cell_text = \"\\n\".join(p.text
+    for p in cell.paragraphs)\r\n            cells.append({\"type\": \"tableCell\",
+    \"children\": [{\"type\": \"text\", \"text\": cell_text}]})\r\n        rows.append({\"type\":
+    \"tableRow\", \"children\": cells})\r\n    \r\n    return {\"type\": \"table\",
+    \"children\": rows}\r\n\r\ndef extract_text_from_docx(minio, bucket_name, filename):\r\n
+    \   \"\"\"Extract structured content from a DOCX file with full formatting support\"\"\"\r\n
+    \   print(f\"[worker] Extracting text from DOCX: {bucket_name}/{filename}\")\r\n
+    \   \r\n    try:\r\n        # Download DOCX from MinIO\r\n        response = minio.get_object(bucket_name,
+    filename)\r\n        docx_bytes = response.read()\r\n        response.close()\r\n
+    \       response.release_conn()\r\n        \r\n        # Open DOCX with python-docx\r\n
+    \       doc = DocxDocument(BytesIO(docx_bytes))\r\n        \r\n        content_blocks
+    = []\r\n        current_list = None\r\n        current_list_type = None\r\n        \r\n
+    \       # Process document body - paragraphs and tables in order\r\n        for
+    element in doc.element.body:\r\n            # Check if it's a table\r\n            if
+    element.tag.endswith('tbl'):\r\n                # Flush any current list\r\n                if
+    current_list:\r\n                    content_blocks.append(current_list)\r\n                    current_list
+    = None\r\n                \r\n                # Find the table object\r\n                for
+    table in doc.tables:\r\n                    if table._element == element:\r\n
+    \                       content_blocks.append({\r\n                            \"type\":
+    \"table\",\r\n                            \"rows\": [[cell.text for cell in row.cells]
+    for row in table.rows]\r\n                        })\r\n                        break\r\n
+    \           \r\n            # Check if it's a paragraph\r\n            elif element.tag.endswith('p'):\r\n
+    \               # Find matching paragraph object\r\n                para = None\r\n
+    \               for p in doc.paragraphs:\r\n                    if p._element
+    == element:\r\n                        para = p\r\n                        break\r\n
+    \               \r\n                if para is None:\r\n                    continue\r\n
+    \               \r\n                text = para.text.strip()\r\n                if
+    not text:\r\n                    # Empty paragraph - flush list\r\n                    if
+    current_list:\r\n                        content_blocks.append(current_list)\r\n
+    \                       current_list = None\r\n                    continue\r\n
+    \               \r\n                # Check for heading\r\n                style_name
+    = para.style.name.lower() if para.style else \"\"\r\n                \r\n                if
+    \"heading\" in style_name or \"title\" in style_name or \"kop\" in style_name:\r\n
+    \                   # Flush list\r\n                    if current_list:\r\n                        content_blocks.append(current_list)\r\n
+    \                       current_list = None\r\n                    \r\n                    #
+    Extract heading level\r\n                    level = 1\r\n                    for
+    char in style_name:\r\n                        if char.isdigit():\r\n                            level
+    = int(char)\r\n                            break\r\n                    \r\n                    content_blocks.append({\r\n
+    \                       \"type\": \"heading\",\r\n                        \"level\":
+    level,\r\n                        \"text\": text,\r\n                        \"children\":
+    extract_runs_with_formatting(para)\r\n                    })\r\n                    continue\r\n
+    \               \r\n                # Check for list\r\n                list_info
+    = get_list_info(para)\r\n                if list_info[\"is_list\"]:\r\n                    list_type
+    = \"orderedList\" if list_info[\"ordered\"] else \"bulletList\"\r\n                    \r\n
+    \                   # Start new list or continue existing\r\n                    if
+    current_list is None or current_list_type != list_type:\r\n                        if
+    current_list:\r\n                            content_blocks.append(current_list)\r\n
+    \                       current_list = {\"type\": list_type, \"items\": []}\r\n
+    \                       current_list_type = list_type\r\n                    \r\n
+    \                   current_list[\"items\"].append({\r\n                        \"type\":
+    \"listItem\",\r\n                        \"text\": text,\r\n                        \"children\":
+    extract_runs_with_formatting(para)\r\n                    })\r\n                    continue\r\n
+    \               \r\n                # Regular paragraph - flush any list first\r\n
+    \               if current_list:\r\n                    content_blocks.append(current_list)\r\n
+    \                   current_list = None\r\n                \r\n                #
+    Check if bold text might be a heading\r\n                is_bold_heading = False\r\n
+    \               if para.runs:\r\n                    first_run = para.runs[0]\r\n
+    \                   if first_run.bold and len(text.split()) < 15:\r\n                        #
+    Check font size too\r\n                        if first_run.font.size and first_run.font.size
+    >= Pt(14):\r\n                            is_bold_heading = True\r\n                        elif
+    first_run.bold and len(text.split()) < 8:\r\n                            is_bold_heading
+    = True\r\n                \r\n                if is_bold_heading:\r\n                    content_blocks.append({\r\n
+    \                       \"type\": \"heading\",\r\n                        \"level\":
+    3,\r\n                        \"text\": text,\r\n                        \"children\":
+    extract_runs_with_formatting(para)\r\n                    })\r\n                else:\r\n
+    \                   content_blocks.append({\r\n                        \"type\":
+    \"paragraph\",\r\n                        \"text\": text,\r\n                        \"children\":
+    extract_runs_with_formatting(para)\r\n                    })\r\n        \r\n        #
+    Flush any remaining list\r\n        if current_list:\r\n            content_blocks.append(current_list)\r\n
+    \       \r\n        print(f\"[worker] DOCX: {len(content_blocks)} content blocks
+    (including tables/lists)\")\r\n        \r\n        # Count different types\r\n
+    \       types_count = {}\r\n        for block in content_blocks:\r\n            t
+    = block.get(\"type\", \"unknown\")\r\n            types_count[t] = types_count.get(t,
+    0) + 1\r\n        print(f\"[worker] Block types: {types_count}\")\r\n        \r\n
+    \       # Return as single \"page\"\r\n        return [{\"page_number\": 1, \"content\":
+    content_blocks}]\r\n        \r\n    except Exception as e:\r\n        print(f\"[worker]
+    Error extracting DOCX text: {e}\")\r\n        import traceback\r\n        traceback.print_exc()\r\n
+    \       return None\r\n\r\ndef detect_file_type(minio, bucket_name, filename):\r\n
+    \   \"\"\"Detect file type from content (magic bytes)\"\"\"\r\n    try:\r\n        response
+    = minio.get_object(bucket_name, filename, length=8)\r\n        header = response.read()\r\n
+    \       response.close()\r\n        response.release_conn()\r\n        \r\n        #
+    PDF starts with %PDF\r\n        if header.startswith(b'%PDF'):\r\n            return
+    'pdf'\r\n        \r\n        # DOCX (ZIP with specific content) starts with PK\r\n
+    \       if header.startswith(b'PK\\x03\\x04'):\r\n            return 'docx'\r\n
+    \       \r\n        return 'unknown'\r\n    except Exception as e:\r\n        print(f\"[worker]
+    Error detecting file type: {e}\")\r\n        return 'unknown'\r\n\r\ndef fix_encoding(text):\r\n
+    \   \"\"\"Fix common encoding issues from PDF extraction\"\"\"\r\n    # Common
+    Windows-1252 to UTF-8 misinterpretations\r\n    replacements = {\r\n        'â€\"':
+    '—',  # em-dash\r\n        'â€\"': '–',  # en-dash\r\n        'â€™': \"'\",  #
+    right single quote\r\n        'â€œ': '\"',  # left double quote\r\n        'â€':
+    '\"',   # right double quote\r\n        'â€¦': '…',  # ellipsis\r\n        'Ã©':
+    'é',\r\n        'Ã¨': 'è',\r\n        'Ã«': 'ë',\r\n        'Ã¯': 'ï',\r\n        'Ã¶':
+    'ö',\r\n        'Ã¼': 'ü',\r\n        'Ã ': 'à',\r\n        'ΓÇô': '–',  # en-dash
+    variant\r\n        'ΓÇö': '—',  # em-dash variant\r\n        'ΓÇï': '',   # zero-width
+    space\r\n        'ΓÇ£': '\"',  # quote\r\n        'ΓÇª': '…',  # ellipsis\r\n
+    \       '\\u200b': '', # zero-width space\r\n        '\\ufeff': '', # BOM\r\n
+    \   }\r\n    \r\n    for old, new in replacements.items():\r\n        text = text.replace(old,
+    new)\r\n    \r\n    return text\r\n\r\ndef make_headers(trace_id):\r\n    return
+    {\r\n        \"x-kimi-worker-instance-name\": INSTANCE_NAME,\r\n        \"x-kimi-worker-name\":
+    WORKER_NAME,\r\n        \"x-trace-id\": trace_id,\r\n        \"timestamp\": datetime.utcnow().isoformat()\r\n
+    \   }\r\n\r\ndef extract_page_content(attributes):\r\n    \"\"\"Extract page content
+    from job attributes\"\"\"\r\n    pages = []\r\n    \r\n    # Check if we have
+    content attribute\r\n    content_attr = attributes.get(\"content\", {})\r\n    if
+    \"values\" in content_attr:\r\n        for value in content_attr[\"values\"]:\r\n
+    \           if \"stringResult\" in value:\r\n                try:\r\n                    page_content
+    = json.loads(value[\"stringResult\"])\r\n                    pages.append(page_content)\r\n
+    \               except json.JSONDecodeError:\r\n                    pages.append({\"text\":
+    value[\"stringResult\"]})\r\n    \r\n    return pages\r\n\r\ndef convert_text_children_to_spec(text_children):\r\n
+    \   \"\"\"Convert text children with marks to NLdoc spec format\"\"\"\r\n    result
+    = []\r\n    for child in text_children:\r\n        if child.get(\"type\") == \"text\":\r\n
+    \           text_node = {\r\n                \"id\": str(uuid.uuid4()),\r\n                \"type\":
+    \"https://spec.nldoc.nl/Resource/Text\",\r\n                \"text\": child.get(\"text\",
+    \"\")\r\n            }\r\n            # Add marks if present (bold, italic, underline)\r\n
+    \           marks = child.get(\"marks\", [])\r\n            if marks:\r\n                text_node[\"marks\"]
+    = marks\r\n            result.append(text_node)\r\n    return result if result
+    else [{\"id\": str(uuid.uuid4()), \"type\": \"https://spec.nldoc.nl/Resource/Text\",
+    \"text\": \"\"}]\r\n\r\ndef generate_spec_from_content(doc_id, page_count, page_contents):\r\n
+    \   \"\"\"Generate NLdoc spec JSON from structured page contents\r\n    \r\n    NLdoc
+    spec format uses https://spec.nldoc.nl/Resource/* types:\r\n    - Document: root
+    element\r\n    - Heading: heading with level (10=h1, 20=h2, 30=h3, etc)\r\n    -
+    Paragraph: paragraph container\r\n    - Text: text content with optional marks\r\n
+    \   - Table: table container\r\n    - TableRow: table row\r\n    - TableCell:
+    table cell\r\n    - BulletList/OrderedList: list containers\r\n    - ListItem:
+    list item\r\n    \"\"\"\r\n    \r\n    children = []\r\n    \r\n    if page_contents:\r\n
+    \       for page in page_contents:\r\n            content_blocks = page.get(\"content\",
+    [])\r\n            \r\n            for block in content_blocks:\r\n                block_type
+    = block.get(\"type\", \"paragraph\")\r\n                text = block.get(\"text\",
+    \"\").strip()\r\n                text_children = block.get(\"children\", [])\r\n
+    \               \r\n                # Handle headings\r\n                if block_type
+    == \"heading\":\r\n                    level = block.get(\"level\", 2)\r\n                    #
+    NLdoc uses level * 10 (10=h1, 20=h2, 30=h3, etc)\r\n                    heading_level
+    = level * 10 if level <= 6 else 60\r\n                    \r\n                    spec_children
+    = convert_text_children_to_spec(text_children) if text_children else [{\r\n                        \"id\":
+    str(uuid.uuid4()),\r\n                        \"type\": \"https://spec.nldoc.nl/Resource/Text\",\r\n
+    \                       \"text\": text\r\n                    }]\r\n                    \r\n
+    \                   children.append({\r\n                        \"id\": str(uuid.uuid4()),\r\n
+    \                       \"type\": \"https://spec.nldoc.nl/Resource/Heading\",\r\n
+    \                       \"level\": heading_level,\r\n                        \"children\":
+    spec_children\r\n                    })\r\n                \r\n                #
+    Handle tables\r\n                elif block_type == \"table\":\r\n                    rows
+    = block.get(\"rows\", [])\r\n                    table_rows = []\r\n                    \r\n
+    \                   for row_idx, row in enumerate(rows):\r\n                        table_cells
+    = []\r\n                        for cell_text in row:\r\n                            table_cells.append({\r\n
+    \                               \"id\": str(uuid.uuid4()),\r\n                                \"type\":
+    \"https://spec.nldoc.nl/Resource/TableCell\",\r\n                                \"children\":
+    [{\r\n                                    \"id\": str(uuid.uuid4()),\r\n                                    \"type\":
+    \"https://spec.nldoc.nl/Resource/Paragraph\",\r\n                                    \"children\":
+    [{\r\n                                        \"id\": str(uuid.uuid4()),\r\n                                        \"type\":
+    \"https://spec.nldoc.nl/Resource/Text\",\r\n                                        \"text\":
+    cell_text\r\n                                    }]\r\n                                }]\r\n
+    \                           })\r\n                        \r\n                        #
+    First row might be header\r\n                        row_type = \"https://spec.nldoc.nl/Resource/TableHeaderRow\"
+    if row_idx == 0 else \"https://spec.nldoc.nl/Resource/TableRow\"\r\n                        table_rows.append({\r\n
+    \                           \"id\": str(uuid.uuid4()),\r\n                            \"type\":
+    row_type,\r\n                            \"children\": table_cells\r\n                        })\r\n
+    \                   \r\n                    if table_rows:\r\n                        children.append({\r\n
+    \                           \"id\": str(uuid.uuid4()),\r\n                            \"type\":
+    \"https://spec.nldoc.nl/Resource/Table\",\r\n                            \"children\":
+    table_rows\r\n                        })\r\n                \r\n                #
+    Handle bullet lists\r\n                elif block_type == \"bulletList\":\r\n
+    \                   list_items = []\r\n                    for item in block.get(\"items\",
+    []):\r\n                        item_text = item.get(\"text\", \"\")\r\n                        item_children
+    = item.get(\"children\", [])\r\n                        \r\n                        spec_children
+    = convert_text_children_to_spec(item_children) if item_children else [{\r\n                            \"id\":
+    str(uuid.uuid4()),\r\n                            \"type\": \"https://spec.nldoc.nl/Resource/Text\",\r\n
+    \                           \"text\": item_text\r\n                        }]\r\n
+    \                       \r\n                        list_items.append({\r\n                            \"id\":
+    str(uuid.uuid4()),\r\n                            \"type\": \"https://spec.nldoc.nl/Resource/ListItem\",\r\n
+    \                           \"children\": [{\r\n                                \"id\":
+    str(uuid.uuid4()),\r\n                                \"type\": \"https://spec.nldoc.nl/Resource/Paragraph\",\r\n
+    \                               \"children\": spec_children\r\n                            }]\r\n
+    \                       })\r\n                    \r\n                    if list_items:\r\n
+    \                       children.append({\r\n                            \"id\":
+    str(uuid.uuid4()),\r\n                            \"type\": \"https://spec.nldoc.nl/Resource/BulletList\",\r\n
+    \                           \"children\": list_items\r\n                        })\r\n
+    \               \r\n                # Handle ordered lists\r\n                elif
+    block_type == \"orderedList\":\r\n                    list_items = []\r\n                    for
+    idx, item in enumerate(block.get(\"items\", [])):\r\n                        item_text
+    = item.get(\"text\", \"\")\r\n                        item_children = item.get(\"children\",
+    [])\r\n                        \r\n                        spec_children = convert_text_children_to_spec(item_children)
+    if item_children else [{\r\n                            \"id\": str(uuid.uuid4()),\r\n
+    \                           \"type\": \"https://spec.nldoc.nl/Resource/Text\",\r\n
+    \                           \"text\": item_text\r\n                        }]\r\n
+    \                       \r\n                        list_items.append({\r\n                            \"id\":
+    str(uuid.uuid4()),\r\n                            \"type\": \"https://spec.nldoc.nl/Resource/ListItem\",\r\n
+    \                           \"order\": idx + 1,\r\n                            \"children\":
+    [{\r\n                                \"id\": str(uuid.uuid4()),\r\n                                \"type\":
+    \"https://spec.nldoc.nl/Resource/Paragraph\",\r\n                                \"children\":
+    spec_children\r\n                            }]\r\n                        })\r\n
+    \                   \r\n                    if list_items:\r\n                        children.append({\r\n
+    \                           \"id\": str(uuid.uuid4()),\r\n                            \"type\":
+    \"https://spec.nldoc.nl/Resource/OrderedList\",\r\n                            \"children\":
+    list_items\r\n                        })\r\n                \r\n                #
+    Handle paragraphs\r\n                elif block_type == \"paragraph\":\r\n                    if
+    not text:\r\n                        continue\r\n                    \r\n                    spec_children
+    = convert_text_children_to_spec(text_children) if text_children else [{\r\n                        \"id\":
+    str(uuid.uuid4()),\r\n                        \"type\": \"https://spec.nldoc.nl/Resource/Text\",\r\n
+    \                       \"text\": text\r\n                    }]\r\n                    \r\n
+    \                   children.append({\r\n                        \"id\": str(uuid.uuid4()),\r\n
+    \                       \"type\": \"https://spec.nldoc.nl/Resource/Paragraph\",\r\n
+    \                       \"children\": spec_children\r\n                    })\r\n
+    \   \r\n    if not children:\r\n        # Fallback: no content available\r\n        children.append({\r\n
+    \           \"id\": str(uuid.uuid4()),\r\n            \"type\": \"https://spec.nldoc.nl/Resource/Paragraph\",\r\n
+    \           \"children\": [{\r\n                \"id\": str(uuid.uuid4()),\r\n
+    \               \"type\": \"https://spec.nldoc.nl/Resource/Text\",\r\n                \"text\":
+    f\"Dit document bevat {page_count} pagina's maar de tekst kon niet worden geëxtraheerd.\"\r\n
+    \           }]\r\n        })\r\n    \r\n    return {\r\n        \"id\": str(uuid.uuid4()),\r\n
+    \       \"type\": \"https://spec.nldoc.nl/Resource/Document\",\r\n        \"children\":
+    children\r\n    }\r\n\r\ndef spec_to_html(spec):\r\n    \"\"\"Convert NLdoc spec
+    JSON to accessible HTML\"\"\"\r\n    \r\n    def render_marks(text, marks):\r\n
+    \       \"\"\"Apply marks (bold, italic, underline) to text\"\"\"\r\n        if
+    not marks:\r\n            return html_escape(text)\r\n        \r\n        result
+    = html_escape(text)\r\n        for mark in marks:\r\n            mark_type = mark.get(\"type\",
+    \"\")\r\n            if mark_type == \"bold\" or mark_type == \"strong\":\r\n
+    \               result = f\"<strong>{result}</strong>\"\r\n            elif mark_type
+    == \"italic\" or mark_type == \"em\":\r\n                result = f\"<em>{result}</em>\"\r\n
+    \           elif mark_type == \"underline\":\r\n                result = f\"<u>{result}</u>\"\r\n
+    \       return result\r\n    \r\n    def html_escape(text):\r\n        \"\"\"Escape
+    HTML special characters\"\"\"\r\n        if not text:\r\n            return \"\"\r\n
+    \       return (text\r\n            .replace(\"&\", \"&amp;\")\r\n            .replace(\"<\",
+    \"&lt;\")\r\n            .replace(\">\", \"&gt;\")\r\n            .replace('\"',
+    \"&quot;\")\r\n            .replace(\"'\", \"&#x27;\"))\r\n    \r\n    def render_children(children):\r\n
+    \       \"\"\"Render an array of children nodes\"\"\"\r\n        result = []\r\n
+    \       for child in children:\r\n            result.append(render_node(child))\r\n
+    \       return \"\".join(result)\r\n    \r\n    def render_node(node):\r\n        \"\"\"Render
+    a single node to HTML\"\"\"\r\n        node_type = node.get(\"type\", \"\")\r\n
+    \       children = node.get(\"children\", [])\r\n        \r\n        # Text node\r\n
+    \       if node_type.endswith(\"/Text\"):\r\n            text = node.get(\"text\",
+    \"\")\r\n            marks = node.get(\"marks\", [])\r\n            return render_marks(text,
+    marks)\r\n        \r\n        # Heading\r\n        if node_type.endswith(\"/Heading\"):\r\n
+    \           level = node.get(\"level\", 20)\r\n            h_level = min(6, max(1,
+    level // 10))  # Convert 10->1, 20->2, etc\r\n            content = render_children(children)\r\n
+    \           return f\"<h{h_level}>{content}</h{h_level}>\\n\"\r\n        \r\n
+    \       # Paragraph\r\n        if node_type.endswith(\"/Paragraph\"):\r\n            content
+    = render_children(children)\r\n            return f\"<p>{content}</p>\\n\"\r\n
+    \       \r\n        # BulletList\r\n        if node_type.endswith(\"/BulletList\"):\r\n
+    \           content = render_children(children)\r\n            return f\"<ul>\\n{content}</ul>\\n\"\r\n
+    \       \r\n        # OrderedList\r\n        if node_type.endswith(\"/OrderedList\"):\r\n
+    \           content = render_children(children)\r\n            return f\"<ol>\\n{content}</ol>\\n\"\r\n
+    \       \r\n        # ListItem\r\n        if node_type.endswith(\"/ListItem\"):\r\n
+    \           content = render_children(children)\r\n            return f\"<li>{content}</li>\\n\"\r\n
+    \       \r\n        # Table\r\n        if node_type.endswith(\"/Table\"):\r\n
+    \           content = render_children(children)\r\n            return f\"<table>\\n{content}</table>\\n\"\r\n
+    \       \r\n        # TableHeaderRow\r\n        if node_type.endswith(\"/TableHeaderRow\"):\r\n
+    \           cells = []\r\n            for child in children:\r\n                cell_content
+    = render_children(child.get(\"children\", []))\r\n                cells.append(f\"<th>{cell_content}</th>\")\r\n
+    \           return f\"<tr>{''.join(cells)}</tr>\\n\"\r\n        \r\n        #
+    TableRow\r\n        if node_type.endswith(\"/TableRow\"):\r\n            cells
+    = []\r\n            for child in children:\r\n                cell_content = render_children(child.get(\"children\",
+    []))\r\n                cells.append(f\"<td>{cell_content}</td>\")\r\n            return
+    f\"<tr>{''.join(cells)}</tr>\\n\"\r\n        \r\n        # TableCell (standalone,
+    shouldn't normally be rendered directly)\r\n        if node_type.endswith(\"/TableCell\"):\r\n
+    \           content = render_children(children)\r\n            return content\r\n
+    \       \r\n        # Document\r\n        if node_type.endswith(\"/Document\"):\r\n
+    \           return render_children(children)\r\n        \r\n        # Unknown
+    - try to render children\r\n        if children:\r\n            return render_children(children)\r\n
+    \       \r\n        return \"\"\r\n    \r\n    # Generate HTML\r\n    body = render_node(spec)\r\n
+    \   \r\n    html = f'''<!DOCTYPE html>\r\n<html lang=\"nl\">\r\n<head>\r\n    <meta
+    charset=\"UTF-8\">\r\n    <meta name=\"viewport\" content=\"width=device-width,
+    initial-scale=1.0\">\r\n    <title>Geconverteerd Document</title>\r\n    <style>\r\n
+    \       body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Oxygen, Ubuntu, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto;
+    padding: 2rem; color: #333; }}\r\n        h1, h2, h3, h4, h5, h6 {{ margin-top:
+    1.5em; margin-bottom: 0.5em; color: #1a1a1a; }}\r\n        h1 {{ font-size: 2rem;
+    border-bottom: 2px solid #eee; padding-bottom: 0.3em; }}\r\n        h2 {{ font-size:
+    1.5rem; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }}\r\n        h3
+    {{ font-size: 1.25rem; }}\r\n        p {{ margin: 1em 0; }}\r\n        ul, ol
+    {{ margin: 1em 0; padding-left: 2em; }}\r\n        li {{ margin: 0.3em 0; }}\r\n
+    \       table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}\r\n
+    \       th, td {{ border: 1px solid #ddd; padding: 0.75em; text-align: left; }}\r\n
+    \       th {{ background-color: #f5f5f5; font-weight: bold; }}\r\n        tr:nth-child(even)
+    {{ background-color: #fafafa; }}\r\n        strong {{ font-weight: bold; }}\r\n
+    \       em {{ font-style: italic; }}\r\n        u {{ text-decoration: underline;
+    }}\r\n    </style>\r\n</head>\r\n<body>\r\n{body}\r\n</body>\r\n</html>'''\r\n
+    \   \r\n    return html\r\n\r\ndef spec_to_tiptap(spec):\r\n    \"\"\"Convert
+    NLdoc spec JSON (Resource/*) to TipTap JSON (doc/content).\"\"\"\r\n\r\n    def
+    marks_to_tiptap(marks):\r\n        # NLdoc marks are stored as [{\"type\":\"bold\"|\"italic\"|\"underline\"|...}]\r\n
+    \       if not marks:\r\n            return None\r\n        out = []\r\n        for
+    m in marks:\r\n            t = (m or {}).get(\"type\")\r\n            if t in
+    (\"bold\", \"strong\"):\r\n                out.append({\"type\": \"bold\"})\r\n
+    \           elif t in (\"italic\", \"em\"):\r\n                out.append({\"type\":
+    \"italic\"})\r\n            elif t == \"underline\":\r\n                out.append({\"type\":
+    \"underline\"})\r\n        return out or None\r\n\r\n    def as_list(v):\r\n        return
+    v if isinstance(v, list) else []\r\n\r\n    def render_inline(children):\r\n        #
+    Returns list of tiptap inline nodes\r\n        out = []\r\n        for c in as_list(children):\r\n
+    \           t = c.get(\"type\", \"\")\r\n            if t.endswith(\"/Text\"):\r\n
+    \               node = {\"type\": \"text\", \"text\": c.get(\"text\", \"\")}\r\n
+    \               marks = marks_to_tiptap(c.get(\"marks\"))\r\n                if
+    marks:\r\n                    node[\"marks\"] = marks\r\n                out.append(node)\r\n
+    \       return out\r\n\r\n    def render_block(node):\r\n        t = node.get(\"type\",
+    \"\")\r\n        children = node.get(\"children\", [])\r\n\r\n        if t.endswith(\"/Heading\"):\r\n
+    \           level = int(node.get(\"level\", 20) // 10) if isinstance(node.get(\"level\"),
+    int) else 2\r\n            level = max(1, min(6, level))\r\n            return
+    {\r\n                \"type\": \"heading\",\r\n                \"attrs\": {\"level\":
+    level},\r\n                \"content\": render_inline(children) or [{\"type\":
+    \"text\", \"text\": \"\"}],\r\n            }\r\n\r\n        if t.endswith(\"/Paragraph\"):\r\n
+    \           return {\r\n                \"type\": \"paragraph\",\r\n                \"content\":
+    render_inline(children) or [{\"type\": \"text\", \"text\": \"\"}],\r\n            }\r\n\r\n
+    \       if t.endswith(\"/BulletList\"):\r\n            return {\r\n                \"type\":
+    \"bulletList\",\r\n                \"content\": [render_block(c) for c in as_list(children)
+    if render_block(c)],\r\n            }\r\n\r\n        if t.endswith(\"/OrderedList\"):\r\n
+    \           return {\r\n                \"type\": \"orderedList\",\r\n                \"content\":
+    [render_block(c) for c in as_list(children) if render_block(c)],\r\n            }\r\n\r\n
+    \       if t.endswith(\"/ListItem\"):\r\n            # children are typically
+    Paragraph nodes\r\n            return {\r\n                \"type\": \"listItem\",\r\n
+    \               \"content\": [render_block(c) for c in as_list(children) if render_block(c)],\r\n
+    \           }\r\n\r\n        if t.endswith(\"/Table\"):\r\n            rows =
+    []\r\n            for r in as_list(children):\r\n                rt = r.get(\"type\",
+    \"\")\r\n                rchildren = as_list(r.get(\"children\", []))\r\n                if
+    rt.endswith(\"/TableHeaderRow\"):\r\n                    cells = []\r\n                    for
+    cell in rchildren:\r\n                        # NLdoc: TableCell -> [Paragraph...]\r\n
+    \                       cell_paras = [render_block(p) for p in as_list(cell.get(\"children\",
+    [])) if render_block(p)]\r\n                        cells.append({\"type\": \"tableHeader\",
+    \"content\": cell_paras or [{\"type\": \"paragraph\", \"content\": [{\"type\":
+    \"text\", \"text\": \"\"}]}]})\r\n                    rows.append({\"type\": \"tableRow\",
+    \"content\": cells})\r\n                elif rt.endswith(\"/TableRow\"):\r\n                    cells
+    = []\r\n                    for cell in rchildren:\r\n                        cell_paras
+    = [render_block(p) for p in as_list(cell.get(\"children\", [])) if render_block(p)]\r\n
+    \                       cells.append({\"type\": \"tableCell\", \"content\": cell_paras
+    or [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"\"}]}]})\r\n
+    \                   rows.append({\"type\": \"tableRow\", \"content\": cells})\r\n
+    \           return {\"type\": \"table\", \"content\": rows}\r\n\r\n        # Unknown/unsupported
+    block\r\n        return None\r\n\r\n    doc_children = []\r\n    if isinstance(spec,
+    dict) and str(spec.get(\"type\", \"\")).endswith(\"/Document\"):\r\n        for
+    c in as_list(spec.get(\"children\", [])):\r\n            b = render_block(c)\r\n
+    \           if b:\r\n                doc_children.append(b)\r\n\r\n    return
+    {\"type\": \"doc\", \"content\": doc_children}\r\n\r\ndef send_worker_result(ch,
+    doc_id, job_id, spec, trace_id, job_metadata):\r\n    \"\"\"Send worker result
+    back to station-folio-spec and generate HTML\"\"\"\r\n    \r\n    now = datetime.utcnow().isoformat()
+    + \"Z\"\r\n    minio = get_minio()\r\n    \r\n    # Ensure buckets exist\r\n    if
+    not minio.bucket_exists(\"files\"):\r\n        minio.make_bucket(\"files\")\r\n
+    \   if not minio.bucket_exists(\"output\"):\r\n        minio.make_bucket(\"output\")\r\n
+    \   \r\n    # Upload spec to MinIO\r\n    spec_json = json.dumps(spec, ensure_ascii=False)\r\n
+    \   spec_bytes = spec_json.encode(\"utf-8\")\r\n    minio.put_object(\"files\",
+    f\"{doc_id}.spec.json\", BytesIO(spec_bytes), len(spec_bytes), content_type=\"application/json\")\r\n
+    \   print(f\"[worker] Uploaded spec to files/{doc_id}.spec.json\")\r\n    \r\n
+    \   # Generate and upload HTML directly (bypassing html-writer)\r\n    html_content
+    = spec_to_html(spec)\r\n    html_bytes = html_content.encode(\"utf-8\")\r\n    minio.put_object(\r\n
+    \       \"output\",\r\n        f\"{doc_id}.html\",\r\n        BytesIO(html_bytes),\r\n
+    \       len(html_bytes),\r\n        content_type=\"text/html; charset=utf-8\",\r\n
+    \   )\r\n    print(f\"[worker] Uploaded HTML to output/{doc_id}.html ({len(html_bytes)}
+    bytes)\")\r\n\r\n    # If the requested target is TipTap JSON, also generate &
+    upload that and point DONE to it.\r\n    target = job_metadata.get(\"targetFileType\",
+    \"text/html\")\r\n    tiptap_location = None\r\n    if target == \"application/vnd.nldoc.tiptap+json\":\r\n
+    \       tiptap_doc = spec_to_tiptap(spec)\r\n        tiptap_bytes = json.dumps(tiptap_doc,
+    ensure_ascii=False).encode(\"utf-8\")\r\n        minio.put_object(\r\n            \"output\",\r\n
+    \           f\"{doc_id}.json\",\r\n            BytesIO(tiptap_bytes),\r\n            len(tiptap_bytes),\r\n
+    \           content_type=\"application/vnd.nldoc.tiptap+json; charset=utf-8\",\r\n
+    \       )\r\n        tiptap_location = f\"{doc_id}.json\"\r\n        print(f\"[worker]
+    Uploaded TipTap JSON to output/{doc_id}.json ({len(tiptap_bytes)} bytes)\")\r\n
+    \   \r\n    result = {\r\n        \"resultType\": \"fileWorkerResult\",\r\n        \"traceId\":
+    trace_id,\r\n        \"recordId\": f\"folio|||{doc_id}\",\r\n        \"jobId\":
+    job_id,\r\n        \"timestamp\": now,\r\n        \"success\": True,\r\n        \"bucketName\":
+    \"files\",\r\n        \"filename\": f\"{doc_id}.spec.json\"\r\n    }\r\n    \r\n
+    \   # Publish result to station-folio-spec\r\n    headers = make_headers(trace_id)\r\n
+    \   ch.basic_publish(\r\n        exchange=\"nldoc.topics\",\r\n        routing_key=f\"worker.folio-spec.results.{job_id}\",\r\n
+    \       body=json.dumps(result),\r\n        properties=pika.BasicProperties(\r\n
+    \           content_type=\"application/json\",\r\n            headers=headers\r\n
+    \       )\r\n    )\r\n    print(f\"[worker] Published result to worker.folio-spec.results.{job_id}\")\r\n
+    \   \r\n    # Publish DONE event for the API/editor stream.\r\n    # The editor
+    expects the event-types schema:\r\n    #   type = https://event.spec.nldoc.nl/done\r\n
+    \   #   context.location = \"<filename>\" (without /file prefix)\r\n    #   context.contentType
+    = requested target content-type\r\n    done_message = {\r\n        \"type\": \"https://event.spec.nldoc.nl/done\",\r\n
+    \       \"timestamp\": now,\r\n        \"traceId\": trace_id,\r\n        \"context\":
+    {\r\n            \"contentType\": target,\r\n            \"location\": tiptap_location
+    or f\"{doc_id}.html\",\r\n        },\r\n    }\r\n\r\n    # Give clients a small
+    window to subscribe to SSE after upload, otherwise the DONE event\r\n    # can
+    be published before the client is listening (the API stream does not always replay
+    history).\r\n    try:\r\n        delay_s = float(os.environ.get(\"DONE_DELAY_SECONDS\",
+    \"2\"))\r\n        if delay_s > 0:\r\n            time.sleep(delay_s)\r\n    except
+    Exception:\r\n        pass\r\n    \r\n    # IMPORTANT: do NOT publish this to
+    documents.{docId}. That topic is consumed by station-document-source\r\n    #
+    which expects a DocumentInfoReport payload and will emit https://event.spec.nldoc.nl/error
+    if parsing fails.\r\n    ch.basic_publish(\r\n        exchange=\"nldoc.topics\",\r\n
+    \       routing_key=f\"events.{doc_id}\",\r\n        body=json.dumps(done_message),\r\n
+    \       properties=pika.BasicProperties(\r\n            content_type=\"application/json\",\r\n
+    \           headers=headers,\r\n            delivery_mode=2\r\n        )\r\n    )\r\n
+    \   print(f\"[worker] Published done event to events.{doc_id}\")\r\n\r\ndef handle_job(ch,
+    method, properties, body):\r\n    \"\"\"Process a worker job from folio-spec station\"\"\"\r\n
+    \   try:\r\n        job = json.loads(body)\r\n        routing_key = method.routing_key\r\n
+    \       \r\n        print(f\"[worker] Received job on {routing_key}\")\r\n        print(f\"[worker]
+    Job keys: {list(job.keys())}\")\r\n        \r\n        # Extract job info\r\n
+    \       record_id = job.get(\"recordId\", \"\")\r\n        doc_id = record_id.split(\"|||\")[-1]
+    if \"|||\" in record_id else job.get(\"filename\", \"unknown\")\r\n        job_id
+    = job.get(\"jobId\", str(uuid.uuid4()))\r\n        bucket_name = job.get(\"bucketName\",
+    \"files\")\r\n        target_file_type = job.get(\"targetFileType\", \"text/html\")\r\n
+    \       \r\n        # Get trace ID from headers or job\r\n        trace_id = doc_id\r\n
+    \       if properties.headers:\r\n            trace_id = properties.headers.get(\"x-trace-id\",
+    doc_id)\r\n        \r\n        print(f\"[worker] Processing doc: {doc_id}, target:
+    {target_file_type}\")\r\n        \r\n        # Extract attributes\r\n        attributes
+    = job.get(\"attributes\", {})\r\n        \r\n        # Get page count\r\n        page_count
+    = 10  # default\r\n        page_count_attr = attributes.get(\"pageCount\", {})\r\n
+    \       if \"values\" in page_count_attr and len(page_count_attr[\"values\"])
+    > 0:\r\n            page_count = int(page_count_attr[\"values\"][0].get(\"stringResult\",
+    10))\r\n        \r\n        print(f\"[worker] Page count: {page_count}\")\r\n
+    \       \r\n        # Extract text from document (PDF or DOCX)\r\n        minio
+    = get_minio()\r\n        original_filename = job.get(\"filename\", doc_id)\r\n
+    \       \r\n        # Detect file type\r\n        file_type = detect_file_type(minio,
+    bucket_name, original_filename)\r\n        print(f\"[worker] Detected file type:
+    {file_type}\")\r\n        \r\n        page_contents = None\r\n        if file_type
+    == 'pdf':\r\n            page_contents = extract_text_from_pdf(minio, bucket_name,
+    original_filename)\r\n        elif file_type == 'docx':\r\n            page_contents
+    = extract_text_from_docx(minio, bucket_name, original_filename)\r\n        else:\r\n
+    \           print(f\"[worker] Unknown file type, trying PDF first then DOCX\")\r\n
+    \           page_contents = extract_text_from_pdf(minio, bucket_name, original_filename)\r\n
+    \           if not page_contents:\r\n                page_contents = extract_text_from_docx(minio,
+    bucket_name, original_filename)\r\n        \r\n        if page_contents:\r\n            print(f\"[worker]
+    Extracted text from {len(page_contents)} pages/sections\")\r\n        else:\r\n
+    \           print(f\"[worker] Could not extract text, using fallback\")\r\n            page_contents
+    = []\r\n        \r\n        # Generate spec\r\n        spec = generate_spec_from_content(doc_id,
+    page_count, page_contents)\r\n        \r\n        # Collect job metadata for downstream
+    stations\r\n        job_metadata = {\r\n            \"bucketName\": bucket_name,\r\n
+    \           \"filename\": job.get(\"filename\", doc_id),\r\n            \"targetFileType\":
+    target_file_type,\r\n            \"kimiRegistrationDate\": job.get(\"kimiRegistrationDate\",
+    datetime.utcnow().isoformat() + \"Z\"),\r\n            \"creationDate\": job.get(\"creationDate\",
+    datetime.utcnow().isoformat() + \"Z\"),\r\n            \"processCount\": job.get(\"processCount\",
+    0),\r\n        }\r\n        \r\n        # Send result\r\n        send_worker_result(ch,
+    doc_id, job_id, spec, trace_id, job_metadata)\r\n        \r\n        # ACK the
+    message\r\n        ch.basic_ack(delivery_tag=method.delivery_tag)\r\n        print(f\"[worker]
+    Completed job for {doc_id}\")\r\n        \r\n    except Exception as e:\r\n        print(f\"[worker]
+    Error processing job: {e}\")\r\n        import traceback\r\n        traceback.print_exc()\r\n
+    \       ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)\r\n\r\ndef
+    send_heartbeat(ch):\r\n    \"\"\"Send worker heartbeat\"\"\"\r\n    # Must match
+    the station WorkerAvailability schema (zod):\r\n    # - workerType: string\r\n
+    \   # - workerInstance: string\r\n    # - state: \"active\" | \"interrupted\"
+    | \"stopped\"\r\n    # - reason: string\r\n    now = datetime.utcnow().isoformat()
+    + \"Z\"\r\n    heartbeat = {\r\n        \"workerType\": WORKER_NAME,\r\n        \"workerName\":
+    \"folio-spec-worker\",\r\n        \"workerInstance\": INSTANCE_NAME,\r\n        \"state\":
+    \"active\",\r\n        \"reason\": \"health report\",\r\n        \"timestamp\":
+    now,\r\n    }\r\n    ch.basic_publish(\r\n        exchange=\"nldoc.topics\",\r\n
+    \       routing_key=f\"worker.folio-spec.health.heartbeats.{INSTANCE_NAME}\",\r\n
+    \       body=json.dumps(heartbeat),\r\n        properties=pika.BasicProperties(content_type=\"application/json\")\r\n
+    \   )\r\n\r\ndef main():\r\n    import threading\r\n\r\n    print(f\"[worker]
+    Starting {INSTANCE_NAME}...\")\r\n    print(f\"[worker] AMQP_URL: {AMQP_URL[:50]
+    if AMQP_URL else 'None'}...\")\r\n\r\n    # Robust consume loop: pika can drop
+    connections (e.g. laptop sleep / network blip).\r\n    # We reconnect instead
+    of crashing the container (CrashLoopBackOff).\r\n    while True:\r\n        stop_hb
+    = threading.Event()\r\n        conn = None\r\n\r\n        try:\r\n            params
+    = pika.URLParameters(AMQP_URL)\r\n            params.heartbeat = 60\r\n            params.blocked_connection_timeout
+    = 300\r\n\r\n            conn = pika.BlockingConnection(params)\r\n            ch
+    = conn.channel()\r\n\r\n            # Declare our queue\r\n            ch.queue_declare(queue=\"worker-folio-spec\",
+    durable=True)\r\n\r\n            # Bind to worker.folio-spec.jobs (for PDF flow)\r\n
+    \           ch.queue_bind(\r\n                exchange=\"nldoc.topics\",\r\n                queue=\"worker-folio-spec\",\r\n
+    \               routing_key=\"worker.folio-spec.jobs\",\r\n            )\r\n\r\n
+    \           # Also bind to worker.docx-spec.jobs (for DOCX flow)\r\n            ch.queue_bind(\r\n
+    \               exchange=\"nldoc.topics\",\r\n                queue=\"worker-folio-spec\",\r\n
+    \               routing_key=\"worker.docx-spec.jobs\",\r\n            )\r\n\r\n
+    \           print(\"[worker] Bound to worker.folio-spec.jobs AND worker.docx-spec.jobs\")\r\n\r\n
+    \           # Send initial heartbeat\r\n            send_heartbeat(ch)\r\n\r\n
+    \           # Heartbeat thread\r\n            def heartbeat_loop():\r\n                while
+    not stop_hb.is_set():\r\n                    time.sleep(30)\r\n                    try:\r\n
+    \                       send_heartbeat(ch)\r\n                    except Exception:\r\n
+    \                       # Connection/channel might be gone; reconnect loop will
+    handle.\r\n                        pass\r\n\r\n            threading.Thread(target=heartbeat_loop,
+    daemon=True).start()\r\n\r\n            # Set QoS and start consuming\r\n            ch.basic_qos(prefetch_count=1)\r\n
+    \           ch.basic_consume(queue=\"worker-folio-spec\", on_message_callback=handle_job)\r\n
+    \           print(\"[worker] Waiting for jobs...\")\r\n            ch.start_consuming()\r\n\r\n
+    \       except Exception as e:\r\n            print(f\"[worker] Connection/consume
+    error: {e}\")\r\n            import traceback\r\n            traceback.print_exc()\r\n
+    \           time.sleep(5)\r\n\r\n        finally:\r\n            stop_hb.set()\r\n
+    \           try:\r\n                if conn and conn.is_open:\r\n                    conn.close()\r\n
+    \           except Exception:\r\n                pass\r\n\r\nif __name__ == \"__main__\":\r\n
+    \   main()\r\n\r\n"
+kind: ConfigMap
+metadata:
+  creationTimestamp: null
+  name: folio-spec-worker-code

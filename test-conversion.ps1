@@ -93,10 +93,20 @@ if ($TestFile -and (Test-Path $TestFile) -and -not $SkipUpload) {
             # Parse response for document ID
             try {
                 $json = $body | ConvertFrom-Json
-                $docId = $json.uuid
+                # API returns: { data: [ { uuid: ... } ] }
+                $docId = $null
+                if ($json.data -and $json.data.Count -gt 0 -and $json.data[0].uuid) {
+                    $docId = $json.data[0].uuid
+                } elseif ($json.uuid) {
+                    # Backwards compatibility
+                    $docId = $json.uuid
+                }
+
                 if ($docId) {
                     Write-Host "       Document ID: $docId" -ForegroundColor Gray
                     $script:DocumentId = $docId
+                } else {
+                    Write-Host "       Could not parse Document ID from response" -ForegroundColor Yellow
                 }
             } catch {
                 Write-Host "       Response: $($body.Substring(0, [Math]::Min(200, $body.Length)))..." -ForegroundColor Gray
@@ -123,48 +133,25 @@ if ($script:DocumentId) {
                   "-H 'Origin: https://editor.nldoc.commonground.nu' " +
                   "--max-time 120"
         
-        $events = @()
-        $startTime = Get-Date
-        $timeout = 120
-        
-        # Run curl and capture output
-        $job = Start-Job -ScriptBlock {
-            param($cmd)
-            Invoke-Expression $cmd
-        } -ArgumentList $sseCmd
-        
-        $completed = $false
-        $lastEvent = ""
-        
-        while (((Get-Date) - $startTime).TotalSeconds -lt $timeout) {
-            if ($job.State -eq "Completed") {
-                $output = Receive-Job $job
-                foreach ($line in ($output -split "`n")) {
-                    if ($line -match "^data:\s*(.+)$") {
-                        $eventData = $Matches[1]
-                        try {
-                            $event = $eventData | ConvertFrom-Json
-                            $eventType = $event.type
-                            Write-Host "  Event: $eventType" -ForegroundColor Yellow
-                            
-                            if ($eventType -match "done|complete") {
-                                $completed = $true
-                                $script:OutputLocation = $event.context.location
-                                Write-Host "  Output: $($script:OutputLocation)" -ForegroundColor Green
-                            }
-                            if ($eventType -match "error") {
-                                Write-Host "  Error: $($event.context.code)" -ForegroundColor Red
-                            }
-                        } catch {}
-                    }
-                }
-                break
+        # Run curl in foreground (more reliable than background job for streaming output)
+        $output = Invoke-Expression $sseCmd 2>&1
+        $raw = if ($output -is [string]) { $output } else { ($output -join "`n") }
+
+        $completed = $raw.Contains("https://event.spec.nldoc.nl/done")
+        if ($completed) {
+            if ($raw -match '\"location\"\\s*:\\s*\"([^\"]+)\"') {
+                $script:OutputLocation = $Matches[1]
+                Write-Host "  Output: $($script:OutputLocation)" -ForegroundColor Green
+            } else {
+                # Fallback: for our HTML flow location is always "{docId}.html"
+                $script:OutputLocation = "$($script:DocumentId).html"
+                Write-Host "  Done event received; using fallback location: $($script:OutputLocation)" -ForegroundColor Yellow
             }
-            Start-Sleep -Milliseconds 500
         }
-        
-        Stop-Job $job -ErrorAction SilentlyContinue
-        Remove-Job $job -ErrorAction SilentlyContinue
+
+        if ($raw.Contains("https://event.spec.nldoc.nl/error")) {
+            Write-Host "  Error event received" -ForegroundColor Red
+        }
         
         Write-TestResult "SSE stream" $completed "Completed: $completed"
         
@@ -178,6 +165,7 @@ if ($script:OutputLocation) {
     Write-TestHeader "Test 5: Download Output"
     
     try {
+        # API client downloads via GET /file/{location}
         $downloadUrl = "$ApiBase/file/$($script:OutputLocation)"
         Write-Host "Downloading: $downloadUrl" -ForegroundColor Gray
         
@@ -188,9 +176,12 @@ if ($script:OutputLocation) {
         $content = Get-Content $outFile -Raw
         $hasHtml = $content -match "<html"
         $hasBody = $content -match "<body"
+        $hasTable = $content -match "<table"
+        $hasList = ($content -match "<ul") -or ($content -match "<ol")
         
         Write-TestResult "Download output" $true "Size: $([math]::Round($fileSize/1024, 2)) KB"
         Write-TestResult "Valid HTML structure" ($hasHtml -and $hasBody)
+        Write-TestResult "Contains tables or lists" ($hasTable -or $hasList)
         
         Write-Host "`nOutput saved to: $outFile" -ForegroundColor Green
         Write-Host "First 500 chars:" -ForegroundColor Gray
@@ -212,7 +203,7 @@ if ($script:OutputLocation) {
     Write-Host "`n[INCOMPLETE] Pipeline did not complete" -ForegroundColor Yellow
     Write-Host "Check logs with:" -ForegroundColor Gray
     Write-Host "  kubectl -n nldoc logs -l app.kubernetes.io/component=worker.document-source --tail=20" -ForegroundColor Gray
-    Write-Host "  kubectl -n nldoc logs folio-spec-worker --tail=20" -ForegroundColor Gray
+    Write-Host "  kubectl -n nldoc logs -l app.kubernetes.io/component=worker.folio-spec-python --tail=50" -ForegroundColor Gray
 }
 
 

@@ -4,5 +4,9 @@ namespace: nldoc
 resources:
 - sa.yaml
 - deployments.yaml
+- custom-workers.yaml
+- folio-spec-worker-code.cm.yaml
+- sse-bridge-code.cm.yaml
+- document-source-shim-code.cm.yaml
 
 

@@ -191,6 +191,7 @@ def main() -> None:
                         # This is bound to the worker-folio-spec queue
                         record_id = f"docx|||{document_id}"
                         job_id = str(uuid.uuid4())
+                        target_file_type = job.get("targetFileType", job.get("targetContentType", "text/html"))
                         
                         # Format that folio-spec-worker expects (same as folio-spec station output)
                         docx_job = {
@@ -198,7 +199,9 @@ def main() -> None:
                             "jobId": job_id,
                             "bucketName": bucket_name,
                             "filename": filename,
-                            "targetFileType": "text/html",  # Always produce HTML
+                            # IMPORTANT: propagate requested target so the editor can request TipTap JSON
+                            # (application/vnd.nldoc.tiptap+json) instead of HTML.
+                            "targetFileType": target_file_type,
                             "attributes": {
                                 "pageCount": {
                                     "values": [{"stringResult": "1"}]
@@ -221,7 +224,7 @@ def main() -> None:
                         )
                         
                         print(
-                            f"[shim] DOCX: Forwarded job to {routing_key}: bucket={bucket_name}, file={filename}, trace={trace_id}",
+                            f"[shim] DOCX: Forwarded job to {routing_key}: bucket={bucket_name}, file={filename}, target={target_file_type}, trace={trace_id}",
                             flush=True,
                         )
                     else:

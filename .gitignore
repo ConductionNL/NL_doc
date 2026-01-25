@@ -3,3 +3,12 @@ Vault-app.docx.pdf
 
 
 folio-spec-worker-pod.yaml
+
+# Local test artifacts / downloads (do not commit)
+temp_spec.json
+output_*.html
+test-output-*.html
+trigger-html.py
+
+# Local test document (do not commit)
+Advies CMS OpenWoo (2).docx

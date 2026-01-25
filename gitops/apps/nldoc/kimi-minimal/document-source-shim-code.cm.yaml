@@ -1,0 +1,149 @@
+apiVersion: v1
+data:
+  app.py: "\"\"\"\r\nDocument-source shim: BYPASS APPROACH for PoC\r\n\r\nThe document-source
+    station rejects our worker registration (unknown worker).\r\nInstead of fighting
+    the station, we bypass it:\r\n1. Consume jobs from the station's worker queue\r\n2.
+    Forward directly to the pdf-pdfmetadata station's input queue\r\n3. Skip the ACK/registration
+    dance entirely\r\n\"\"\"\r\n\r\nimport json\r\nimport os\r\nimport socket\r\nimport
+    sys\r\nimport time\r\nimport uuid\r\nfrom datetime import datetime, timezone\r\nfrom
+    io import BytesIO\r\n\r\nimport pika\r\n\r\n# MinIO client for reading file headers\r\ntry:\r\n
+    \   from minio import Minio\r\n    MINIO_AVAILABLE = True\r\nexcept ImportError:\r\n
+    \   MINIO_AVAILABLE = False\r\n\r\nINSTANCE_NAME = f\"shim-document-source-{socket.gethostname()}\"\r\n\r\n\r\ndef
+    get_env(name: str, default: str | None = None) -> str:\r\n    value = os.getenv(name,
+    default)\r\n    if value is None:\r\n        raise RuntimeError(f\"Missing required
+    env var: {name}\")\r\n    return value\r\n\r\n\r\ndef get_minio_client():\r\n
+    \   \"\"\"Create MinIO client from environment variables\"\"\"\r\n    if not MINIO_AVAILABLE:\r\n
+    \       return None\r\n    \r\n    host = os.getenv(\"S3_HOST\", \"minio\")\r\n
+    \   port = os.getenv(\"S3_PORT\", \"9000\")\r\n    access_key = os.getenv(\"S3_ACCESS_KEY\",
+    \"minioadmin\")\r\n    secret_key = os.getenv(\"S3_SECRET_KEY\", \"minioadmin\")\r\n
+    \   use_ssl = os.getenv(\"S3_USE_SSL\", \"false\").lower() == \"true\"\r\n    \r\n
+    \   return Minio(\r\n        f\"{host}:{port}\",\r\n        access_key=access_key,\r\n
+    \       secret_key=secret_key,\r\n        secure=use_ssl\r\n    )\r\n\r\n\r\ndef
+    detect_file_type_from_minio(bucket_name: str, filename: str) -> str:\r\n    \"\"\"Read
+    first bytes from MinIO to detect file type\"\"\"\r\n    try:\r\n        minio
+    = get_minio_client()\r\n        if not minio:\r\n            return \"unknown\"\r\n
+    \       \r\n        # Read first 8 bytes\r\n        response = minio.get_object(bucket_name,
+    filename, length=8)\r\n        header = response.read()\r\n        response.close()\r\n
+    \       response.release_conn()\r\n        \r\n        # PDF starts with %PDF\r\n
+    \       if header.startswith(b'%PDF'):\r\n            return 'pdf'\r\n        \r\n
+    \       # DOCX (ZIP with specific content) starts with PK\r\n        if header.startswith(b'PK\\x03\\x04'):\r\n
+    \           return 'docx'\r\n        \r\n        return 'unknown'\r\n    except
+    Exception as e:\r\n        print(f\"[shim] Error detecting file type: {e}\", file=sys.stderr,
+    flush=True)\r\n        return 'unknown'\r\n\r\n\r\ndef build_amqp_url() -> str:\r\n
+    \   protocol = os.getenv(\"AMQP_PROTOCOL\", \"amqp\")\r\n    host = get_env(\"AMQP_HOST\",
+    \"rabbitmq\")\r\n    port = os.getenv(\"AMQP_PORT\", \"5672\")\r\n    username
+    = os.getenv(\"AMQP_USERNAME\") or os.getenv(\"AMQP_USER\") or \"guest\"\r\n    password
+    = os.getenv(\"AMQP_PASSWORD\") or os.getenv(\"AMQP_PASS\") or \"guest\"\r\n    return
+    f\"{protocol}://{username}:{password}@{host}:{port}/\"\r\n\r\n\r\ndef main() ->
+    None:\r\n    amqp_url = build_amqp_url()\r\n    exchange = \"nldoc.topics\"\r\n
+    \   \r\n    # What we consume (jobs from document-source station)\r\n    consume_queue
+    = \"worker-document-source\"\r\n    consume_routing_key = \"worker.document-source.jobs\"\r\n
+    \   \r\n    # Where we publish (directly to pdf-pdfmetadata station)\r\n    #
+    The station listens on its station queue, which is bound to station.pdf-pdfmetadata.#\r\n
+    \   publish_queue = \"station-pdf-pdfmetadata\"\r\n\r\n    print(f\"[shim] Worker
+    {INSTANCE_NAME} starting (BYPASS MODE)...\", flush=True)\r\n    print(f\"[shim]
+    Connecting to {amqp_url}\", flush=True)\r\n    params = pika.URLParameters(amqp_url)\r\n\r\n
+    \   while True:\r\n        try:\r\n            with pika.BlockingConnection(params)
+    as connection:\r\n                channel = connection.channel()\r\n                channel.exchange_declare(\r\n
+    \                   exchange=exchange, exchange_type=\"topic\", durable=True\r\n
+    \               )\r\n                \r\n                # Ensure our consume
+    queue exists and is bound\r\n                channel.queue_declare(queue=consume_queue,
+    durable=True)\r\n                channel.queue_bind(\r\n                    queue=consume_queue,
+    exchange=exchange, routing_key=consume_routing_key\r\n                )\r\n                channel.basic_qos(prefetch_count=1)\r\n\r\n
+    \               print(f\"[shim] Consuming from {consume_queue}\", flush=True)\r\n
+    \               print(f\"[shim] Will forward to {publish_queue}\", flush=True)\r\n\r\n
+    \               def handle(ch, method, properties, body):\r\n                    try:\r\n
+    \                       payload = json.loads(body.decode(\"utf-8\"))\r\n                    except
+    Exception as e:\r\n                        print(f\"[shim] Invalid JSON: {e}\",
+    file=sys.stderr, flush=True)\r\n                        ch.basic_ack(delivery_tag=method.delivery_tag)\r\n
+    \                       return\r\n\r\n                    # Extract job from envelope\r\n
+    \                   if isinstance(payload, dict) and \"workerJob\" in payload:\r\n
+    \                       job = payload[\"workerJob\"]\r\n                    else:\r\n
+    \                       job = payload\r\n\r\n                    if not isinstance(job,
+    dict):\r\n                        print(f\"[shim] Job is not a dict: {job}\",
+    file=sys.stderr, flush=True)\r\n                        ch.basic_ack(delivery_tag=method.delivery_tag)\r\n
+    \                       return\r\n\r\n                    bucket_name = job.get(\"bucketName\")\r\n
+    \                   filename = job.get(\"filename\")\r\n                    \r\n
+    \                   if not bucket_name or not filename:\r\n                        print(f\"[shim]
+    Missing bucketName or filename: {job}\", file=sys.stderr, flush=True)\r\n                        ch.basic_ack(delivery_tag=method.delivery_tag)\r\n
+    \                       return\r\n\r\n                    # Generate IDs\r\n                    trace_id
+    = str(uuid.uuid4())\r\n                    document_id = job.get(\"documentId\")
+    or filename\r\n                    \r\n                    # Detect file type
+    from fileType field first\r\n                    file_type = job.get(\"fileType\",
+    \"\").lower()\r\n                    \r\n                    # Determine if this
+    is DOCX or PDF from fileType field\r\n                    is_docx = (\r\n                        \"openxmlformats\"
+    in file_type or \r\n                        \"wordprocessingml\" in file_type
+    or\r\n                        \"docx\" in file_type or\r\n                        str(filename).lower().endswith(\".docx\")\r\n
+    \                   )\r\n                    is_pdf = (\r\n                        \"pdf\"
+    in file_type or\r\n                        str(filename).lower().endswith(\".pdf\")\r\n
+    \                   )\r\n                    \r\n                    # If not
+    determined, read magic bytes from MinIO\r\n                    if not is_docx
+    and not is_pdf:\r\n                        detected_type = detect_file_type_from_minio(bucket_name,
+    filename)\r\n                        print(f\"[shim] Detected file type from magic
+    bytes: {detected_type}\", flush=True)\r\n                        is_docx = detected_type
+    == 'docx'\r\n                        is_pdf = detected_type == 'pdf'\r\n                    \r\n
+    \                   now = datetime.now(timezone.utc).isoformat()\r\n                    \r\n
+    \                   # Headers for the message\r\n                    headers =
+    {\r\n                        \"x-trace-id\": trace_id,\r\n                        \"timestamp\":
+    now,\r\n                    }\r\n                    \r\n                    if
+    is_docx:\r\n                        # DOCX flow: send to folio-spec-worker via
+    worker.docx-spec.jobs\r\n                        # This is bound to the worker-folio-spec
+    queue\r\n                        record_id = f\"docx|||{document_id}\"\r\n                        job_id
+    = str(uuid.uuid4())\r\n                        target_file_type = job.get(\"targetFileType\",
+    job.get(\"targetContentType\", \"text/html\"))\r\n                        \r\n
+    \                       # Format that folio-spec-worker expects (same as folio-spec
+    station output)\r\n                        docx_job = {\r\n                            \"recordId\":
+    record_id,\r\n                            \"jobId\": job_id,\r\n                            \"bucketName\":
+    bucket_name,\r\n                            \"filename\": filename,\r\n                            #
+    IMPORTANT: propagate requested target so the editor can request TipTap JSON\r\n
+    \                           # (application/vnd.nldoc.tiptap+json) instead of HTML.\r\n
+    \                           \"targetFileType\": target_file_type,\r\n                            \"attributes\":
+    {\r\n                                \"pageCount\": {\r\n                                    \"values\":
+    [{\"stringResult\": \"1\"}]\r\n                                }\r\n                            }\r\n
+    \                       }\r\n                        \r\n                        routing_key
+    = \"worker.docx-spec.jobs\"\r\n                        out_body = json.dumps(docx_job).encode(\"utf-8\")\r\n
+    \                       \r\n                        channel.basic_publish(\r\n
+    \                           exchange=exchange,\r\n                            routing_key=routing_key,\r\n
+    \                           body=out_body,\r\n                            properties=pika.BasicProperties(\r\n
+    \                               content_type=\"application/json\",\r\n                                delivery_mode=2,\r\n
+    \                               headers=headers,\r\n                            ),\r\n
+    \                       )\r\n                        \r\n                        print(\r\n
+    \                           f\"[shim] DOCX: Forwarded job to {routing_key}: bucket={bucket_name},
+    file={filename}, target={target_file_type}, trace={trace_id}\",\r\n                            flush=True,\r\n
+    \                       )\r\n                    else:\r\n                        #
+    PDF flow: send to pdf-pdfmetadata station\r\n                        record_id
+    = f\"pdf|||{document_id}\"\r\n                        \r\n                        #
+    Ensure mimeType is set\r\n                        attrs = job.get(\"attributes\")
+    or {}\r\n                        if \"mimeType\" not in attrs:\r\n                            attrs[\"mimeType\"]
+    = \"application/pdf\" if is_pdf else \"application/octet-stream\"\r\n                        \r\n
+    \                       station_input = {\r\n                            \"id\":
+    record_id,\r\n                            \"bucketName\": bucket_name,\r\n                            \"filename\":
+    filename,\r\n                            \"inputType\": \"pdf\",\r\n                            \"targetFileType\":
+    job.get(\"targetFileType\", job.get(\"targetContentType\", \"text/html\")),\r\n
+    \                           \"documentId\": document_id,\r\n                            \"itemIndex\":
+    None,\r\n                            \"traceId\": trace_id,\r\n                            \"processingStartDate\":
+    now,\r\n                            \"state\": \"processing\",\r\n                            \"attributes\":
+    attrs,\r\n                            \"knownAttributeNames\": list(attrs.keys()),\r\n
+    \                           \"knownAttributeStats\": {},\r\n                            \"kimiRegistrationDate\":
+    now,\r\n                            \"creationDate\": now,\r\n                            \"processCount\":
+    0,\r\n                        }\r\n                        \r\n                        routing_key
+    = f\"pdfs.{document_id}\"\r\n                        out_body = json.dumps(station_input).encode(\"utf-8\")\r\n
+    \                       \r\n                        channel.basic_publish(\r\n
+    \                           exchange=exchange,\r\n                            routing_key=routing_key,\r\n
+    \                           body=out_body,\r\n                            properties=pika.BasicProperties(\r\n
+    \                               content_type=\"application/json\",\r\n                                delivery_mode=2,\r\n
+    \                               headers=headers,\r\n                            ),\r\n
+    \                       )\r\n                        \r\n                        print(\r\n
+    \                           f\"[shim] PDF: Forwarded job to {routing_key}: bucket={bucket_name},
+    file={filename}, trace={trace_id}\",\r\n                            flush=True,\r\n
+    \                       )\r\n\r\n                    ch.basic_ack(delivery_tag=method.delivery_tag)\r\n\r\n
+    \               channel.basic_consume(queue=consume_queue, on_message_callback=handle)\r\n
+    \               channel.start_consuming()\r\n\r\n        except Exception as e:\r\n
+    \           print(\r\n                f\"[shim] Connection error: {e}. Retrying
+    in 5s...\",\r\n                file=sys.stderr,\r\n                flush=True,\r\n
+    \           )\r\n            time.sleep(5)\r\n\r\n\r\nif __name__ == \"__main__\":\r\n
+    \   main()\r\n"
+kind: ConfigMap
+metadata:
+  creationTimestamp: null
+  name: document-source-shim-code

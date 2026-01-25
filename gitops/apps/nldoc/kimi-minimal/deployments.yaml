@@ -342,9 +342,12 @@ items:
           fsGroupChangePolicy: Always
         containers:
         - name: worker
-          image: ghcr.io/conductionnl/nldoc-worker-document-source:latest
-          imagePullPolicy: Always
+          image: python:3.11-slim
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "pip install -q pika minio && python -u /app/app.py"]
           env:
+          - name: HOME
+            value: /tmp
           - name: AMQP_HOST
             value: rabbitmq.nldoc.svc.cluster.local
           - name: AMQP_PROTOCOL
@@ -420,9 +423,14 @@ items:
           - name: tmp
             mountPath: /tmp
             subPath: tmp-dir
+          - name: code
+            mountPath: /app
         volumes:
         - name: tmp
           emptyDir: {}
+        - name: code
+          configMap:
+            name: document-source-shim-code
 
 # Station: spec-html
 - apiVersion: apps/v1
